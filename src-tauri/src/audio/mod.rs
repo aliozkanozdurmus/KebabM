@@ -6,6 +6,10 @@ pub mod recorder;
 pub mod resampler;
 pub mod session_monitor;
 pub mod system_capture;
+#[cfg(target_os = "linux")]
+pub mod system_linux;
+#[cfg(target_os = "macos")]
+pub mod system_macos;
 pub mod vad;
 pub mod waveform;
 

@@ -207,7 +207,7 @@ pub async fn fetch_openrouter_models(
         .get("https://openrouter.ai/api/v1/models")
         .header("Authorization", format!("Bearer {}", api_key))
         .header("HTTP-Referer", "https://nexq.app")
-        .header("X-Title", "NexQ")
+        .header("X-Title", "zaiqoM")
         .send()
         .await
         .map_err(|e| format!("Failed to fetch models: {}", e))?;

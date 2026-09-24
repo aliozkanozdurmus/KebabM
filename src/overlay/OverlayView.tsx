@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState } from "react";
 import { useMeetingStore } from "../stores/meetingStore";
 import { useScenarioStore } from "../stores/scenarioStore";
 import { useCallLogStore } from "../stores/callLogStore";
-import { useAIActionsStore } from "../stores/aiActionsStore";
 import { useTranslationStore } from "../stores/translationStore";
 import { showToast } from "../stores/toastStore";
 import { translateBatch } from "../lib/ipc";
@@ -44,6 +43,7 @@ import {
   Eye,
 } from "lucide-react";
 import { formatDuration } from "../lib/utils";
+import { STT_LANGUAGES } from "../lib/sttLanguages";
 
 // ════════════════════════════════════════════════════════════════
 export function OverlayView() {
@@ -62,13 +62,14 @@ export function OverlayView() {
   const cycleLayout = () => setLayoutMode((m) => m === "split" ? "ai" : m === "ai" ? "transcript" : "split");
   const toggleLog = useCallLogStore((s) => s.toggleOpen);
   const logOpen = useCallLogStore((s) => s.isOpen);
-  const autoTrigger = useAIActionsStore((s) => s.configs.globalDefaults.autoTrigger);
 
   const mutedYou = useConfigStore((s) => s.mutedYou);
   const mutedThem = useConfigStore((s) => s.mutedThem);
   const toggleMuteYou = useConfigStore((s) => s.toggleMuteYou);
   const toggleMuteThem = useConfigStore((s) => s.toggleMuteThem);
   const overlayOpacity = useConfigStore((s) => s.overlayOpacity);
+  const sttLanguage = useConfigStore((s) => s.sttLanguage);
+  const setSTTLanguage = useConfigStore((s) => s.setSTTLanguage);
   const setOverlayOpacity = useConfigStore((s) => s.setOverlayOpacity);
   const OPACITY_PRESETS = [0.9, 0.65, 0.35, 0.1];
   const cycleOpacity = () => {
@@ -81,6 +82,9 @@ export function OverlayView() {
   const displayMode = useTranslationStore((s) => s.displayMode);
   const setDisplayMode = useTranslationStore((s) => s.setDisplayMode);
   const targetLang = useTranslationStore((s) => s.targetLang);
+  const setTargetLang = useTranslationStore((s) => s.setTargetLang);
+  const sourceLang = useTranslationStore((s) => s.sourceLang);
+  const setSourceLang = useTranslationStore((s) => s.setSourceLang);
   const provider = useTranslationStore((s) => s.provider);
   const batchProgress = useTranslationStore((s) => s.batchProgress);
   const isBatchTranslating = batchProgress !== null;
@@ -142,18 +146,18 @@ export function OverlayView() {
     showLauncherWindow().catch(() => {});
   }, [setCurrentView]);
 
-  const meetingTitle = activeMeeting?.title || "NexQ";
+  const meetingTitle = activeMeeting?.title || "zaiqoM";
 
   return (
-    <div className="overlay-bg flex h-full flex-col rounded-xl border border-border/20 shadow-xl" style={{ background: `hsl(var(--background) / ${overlayOpacity})`, backdropFilter: overlayOpacity > 0.7 ? "blur(12px) saturate(1.1)" : "none" }}>
+    <div className="overlay-bg flex h-full flex-col border border-[hsl(var(--border))]" style={{ background: `hsl(var(--background) / ${overlayOpacity})`, boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }}>
 
       {/* ═══ HEADER ═══ */}
       <div
-        className="no-select flex items-center justify-between gap-3 px-4 py-2 cursor-move"
+        className="no-select flex shrink-0 flex-col gap-1 px-3 py-2 cursor-move"
         data-tauri-drag-region
         style={{ borderBottom: "1px solid hsl(var(--border) / 0.12)" }}
       >
-        <div className="flex items-center gap-2.5" data-tauri-drag-region>
+        <div className="flex w-full min-w-0 items-center gap-2" data-tauri-drag-region>
           <GripHorizontal className="h-3 w-3 text-muted-foreground/40" />
           <span className="text-xs font-semibold text-foreground/90 truncate max-w-[160px]" title={meetingTitle}>
             {meetingTitle}
@@ -181,50 +185,60 @@ export function OverlayView() {
           <span className="text-xs text-muted-foreground/60 tabular-nums font-medium">
             {elapsedMs > 0 ? formatDuration(elapsedMs) : "00:00"}
           </span>
+          <span className="flex-1" data-tauri-drag-region />
+          <button
+            onClick={handleEndMeeting}
+            className="flex items-center gap-1.5 rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-1 text-xs font-semibold text-destructive transition-colors hover:bg-destructive/20 cursor-pointer"
+            aria-label="End meeting"
+          >
+            <Square className="h-3 w-3 fill-current" aria-hidden="true" />
+            End
+          </button>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex w-full flex-nowrap items-center gap-1 overflow-x-auto">
           {/* Mute controls */}
-          <button
+          <HeaderBtn
+            icon={mutedYou ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
+            label="You"
+            danger={mutedYou}
             onClick={toggleMuteYou}
-            className={`rounded-lg p-2 transition-all duration-150 cursor-pointer ${
-              mutedYou
-                ? "bg-destructive/15 text-destructive hover:bg-destructive/25"
-                : "text-muted-foreground/60 hover:bg-accent/60 hover:text-foreground"
-            }`}
-            aria-label={mutedYou ? "Unmute mic (You)" : "Mute mic (You)"}
-            aria-pressed={mutedYou}
-            title={mutedYou ? "Unmute mic (You)" : "Mute mic (You)"}
-          >
-            {mutedYou ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
-          </button>
-          <button
+            tooltip={mutedYou ? "Your microphone is muted. Click to hear you again." : "Mute your microphone. Their audio keeps going."}
+          />
+          <HeaderBtn
+            icon={mutedThem ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+            label="Them"
+            danger={mutedThem}
             onClick={toggleMuteThem}
-            className={`rounded-lg p-2 transition-all duration-150 cursor-pointer ${
-              mutedThem
-                ? "bg-destructive/15 text-destructive hover:bg-destructive/25"
-                : "text-muted-foreground/60 hover:bg-accent/60 hover:text-foreground"
-            }`}
-            aria-label={mutedThem ? "Unmute them" : "Mute them"}
-            aria-pressed={mutedThem}
-            title={mutedThem ? "Unmute them" : "Mute them"}
-          >
-            {mutedThem ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
-          </button>
+            tooltip={mutedThem ? "The other side is muted. Click to hear them again." : "Mute the other side. Your microphone keeps going."}
+          />
           <div className="w-px h-3.5 bg-border/20 mx-0.5" />
           <HeaderBtn
             icon={layoutMode === "split" ? <Columns2 className="h-3.5 w-3.5" /> : layoutMode === "ai" ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelRightClose className="h-3.5 w-3.5" />}
+            label="Layout"
             onClick={cycleLayout}
-            tooltip={layoutMode === "split" ? "Focus AI panel" : layoutMode === "ai" ? "Focus Transcript" : "Split view"}
+            tooltip={layoutMode === "split" ? "Show only the answer panel." : layoutMode === "ai" ? "Show only the transcript." : "Show the transcript and the answer side by side."}
           />
-          <div className="w-px h-3.5 bg-border/20 mx-0.5" />
-          <HeaderBtn icon={<BarChart3 className="h-3.5 w-3.5" />} active={statsOpen} onClick={() => setStatsOpen(p => !p)} tooltip="Speaker Stats (S)" />
-          <HeaderBtn icon={<Bookmark className="h-3.5 w-3.5" />} active={bookmarksOpen} onClick={() => setBookmarksOpen(p => !p)} tooltip="Bookmarks (K)" />
-          <HeaderBtn icon={<Activity className="h-3.5 w-3.5" />} active={logOpen} onClick={toggleLog} tooltip="AI Call Log" />
-          <HeaderBtn icon={<Terminal className="h-3.5 w-3.5" />} active={devLogOpen} onClick={() => setDevLogOpen(p => !p)} tooltip="Dev Log (Ctrl+Shift+L)" />
-          <HeaderBtn icon={<Eye className="h-3.5 w-3.5" />} onClick={cycleOpacity} tooltip={`Transparency: ${Math.round(overlayOpacity * 100)}% (click to cycle)`} />
-          <HeaderBtn icon={<Settings className="h-3.5 w-3.5" />} onClick={() => setCurrentView("settings")} tooltip="Settings" />
-          <HeaderBtn icon={<Minus className="h-3.5 w-3.5" />} onClick={handleMinimizeToDashboard} tooltip="Minimize to Dashboard" />
+          <HeaderBtn icon={<BarChart3 className="h-3.5 w-3.5" />} label="Speakers" active={statsOpen} onClick={() => setStatsOpen(p => !p)} tooltip="Who has been talking, and for how long." />
+          <HeaderBtn icon={<Bookmark className="h-3.5 w-3.5" />} label="Marks" active={bookmarksOpen} onClick={() => setBookmarksOpen(p => !p)} tooltip="Save a moment in this meeting so you can jump back to it." />
+          <HeaderBtn icon={<Activity className="h-3.5 w-3.5" />} label="Calls" active={logOpen} onClick={toggleLog} tooltip="The questions sent to the assistant and the answers it gave." />
+          <HeaderBtn icon={<Terminal className="h-3.5 w-3.5" />} label="Log" active={devLogOpen} onClick={() => setDevLogOpen(p => !p)} tooltip="Technical log for speech, audio, and the assistant." />
+          <HeaderBtn icon={<Eye className="h-3.5 w-3.5" />} label="Opacity" onClick={cycleOpacity} tooltip={`Window is ${Math.round(overlayOpacity * 100)}% solid. Click to make it more or less see-through.`} />
+          <HeaderBtn icon={<Settings className="h-3.5 w-3.5" />} label="Settings" onClick={() => setCurrentView("settings")} tooltip="Open settings without ending the meeting." />
+          <HeaderBtn icon={<Minus className="h-3.5 w-3.5" />} label="Home" onClick={handleMinimizeToDashboard} tooltip="Go back to the project list. The meeting keeps running." />
+          <label className="ml-1 flex items-center gap-1 text-[11px] text-muted-foreground" title="Speech recognition language. Changing it restarts listening with the new language.">
+            <span>Language</span>
+            <select
+              value={sttLanguage}
+              onChange={(event) => setSTTLanguage(event.target.value)}
+              aria-label="Speech recognition language"
+              className="bg-transparent text-[11px] text-foreground"
+            >
+              {STT_LANGUAGES.map((language) => (
+                <option key={language.value} value={language.value}>{language.label}</option>
+              ))}
+            </select>
+          </label>
 
           {/* Translation controls */}
           <button
@@ -234,11 +248,38 @@ export function OverlayView() {
                 ? "bg-primary/10 text-primary ring-1 ring-primary/20"
                 : "text-muted-foreground hover:bg-accent"
             }`}
-            title="Toggle auto-translate"
+            title="Turn live translation on or off for the transcript."
           >
             <Globe className="h-3 w-3" />
             Translate
           </button>
+          <label className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground" title="Language the transcript is translated into. It applies to new lines right away.">
+            <span>To</span>
+            <select
+              value={targetLang}
+              onChange={(event) => setTargetLang(event.target.value)}
+              aria-label="Translation language"
+              className="bg-transparent text-[11px] text-foreground"
+            >
+              {TRANSLATION_LANGUAGES.map((language) => (
+                <option key={language.code} value={language.code}>{language.name}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex shrink-0 items-center gap-1 text-[11px] text-muted-foreground" title="Language being spoken. Auto detects it.">
+            <span>From</span>
+            <select
+              value={sourceLang}
+              onChange={(event) => setSourceLang(event.target.value)}
+              aria-label="Spoken language for translation"
+              className="bg-transparent text-[11px] text-foreground"
+            >
+              <option value="auto">Auto</option>
+              {TRANSLATION_LANGUAGES.map((language) => (
+                <option key={language.code} value={language.code}>{language.name}</option>
+              ))}
+            </select>
+          </label>
 
           {autoTranslateActive && (
             <>
@@ -275,14 +316,6 @@ export function OverlayView() {
             </>
           )}
 
-          <button
-            onClick={handleEndMeeting}
-            className="ml-1.5 flex items-center gap-1.5 rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-1.5 text-xs font-semibold text-destructive transition-all duration-150 hover:bg-destructive/20 hover:border-destructive/30 hover:shadow-sm hover:shadow-destructive/10 cursor-pointer"
-            aria-label="End meeting"
-          >
-            <Square className="h-3 w-3 fill-current" aria-hidden="true" />
-            End
-          </button>
         </div>
       </div>
 
@@ -318,11 +351,9 @@ export function OverlayView() {
         {layoutMode !== "transcript" ? (
         <div className="flex min-w-[180px] min-h-0 flex-1 basis-[220px] flex-col gap-2.5 overflow-hidden">
           {/* Question detector — only shown when auto-trigger is on */}
-          {autoTrigger && (
-            <div className="shrink-0 rounded-xl border border-info/10 bg-info/5 px-4 py-3">
-              <QuestionDetector />
-            </div>
-          )}
+          <div className="shrink-0 rounded-xl border border-info/10 bg-info/5 px-4 py-3">
+            <QuestionDetector />
+          </div>
 
           {/* AI Response */}
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-card/20">
@@ -382,17 +413,36 @@ export function OverlayView() {
 }
 
 // ── Header Button ──
-function HeaderBtn({ icon, active, onClick, tooltip }: { icon: React.ReactNode; active?: boolean; onClick: () => void; tooltip: string }) {
+const TRANSLATION_LANGUAGES = [
+  { code: "tr", name: "Turkish" },
+  { code: "en", name: "English" },
+  { code: "de", name: "German" },
+  { code: "fr", name: "French" },
+  { code: "es", name: "Spanish" },
+  { code: "it", name: "Italian" },
+  { code: "pt", name: "Portuguese" },
+  { code: "nl", name: "Dutch" },
+  { code: "pl", name: "Polish" },
+  { code: "ru", name: "Russian" },
+  { code: "ar", name: "Arabic" },
+  { code: "zh", name: "Chinese" },
+  { code: "ja", name: "Japanese" },
+  { code: "ko", name: "Korean" },
+];
+
+function HeaderBtn({ icon, label, active, danger, onClick, tooltip }: { icon: React.ReactNode; label: string; active?: boolean; danger?: boolean; onClick: () => void; tooltip: string }) {
   return (
     <button
       onClick={onClick}
-      className={`rounded-lg p-2 transition-all duration-150 cursor-pointer ${
-        active ? "bg-primary/10 text-primary" : "text-muted-foreground/60 hover:bg-accent/60 hover:text-foreground"
+      title={tooltip}
+      className={`flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-all duration-150 cursor-pointer ${
+        danger ? "bg-destructive/15 text-destructive" : active ? "bg-primary/10 text-primary" : "text-muted-foreground/60 hover:bg-accent/60 hover:text-foreground"
       }`}
       aria-label={tooltip}
       aria-pressed={active}
     >
       {icon}
+      <span>{label}</span>
     </button>
   );
 }

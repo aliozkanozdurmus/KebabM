@@ -13,7 +13,7 @@ pub fn build_idle_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Error
     let copy_transcript = MenuItem::with_id(app, "copy_transcript", "Copy Transcript", true, None::<&str>)?;
     let sep2 = PredefinedMenuItem::separator(app)?;
     let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit NexQ", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit zaiqoM", true, None::<&str>)?;
 
     Menu::with_items(app, &[
         &start, &sep1,
@@ -38,7 +38,7 @@ pub fn build_meeting_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, tauri::Er
     let copy_transcript = MenuItem::with_id(app, "copy_transcript", "Copy Transcript", true, None::<&str>)?;
     let sep4 = PredefinedMenuItem::separator(app)?;
     let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit NexQ", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit zaiqoM", true, None::<&str>)?;
 
     Menu::with_items(app, &[
         &stop, &sep1,

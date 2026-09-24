@@ -73,6 +73,14 @@ pub struct AppState {
     pub shared_groq_config: Arc<RwLock<GroqConfig>>,
     /// Universal pause threshold for transcript line-breaking (ms).
     /// Read lock-free by the system STT task; written by the settings IPC.
+    /// Recognition language (BCP-47). Lives outside the STT router so a
+    /// settings change is kept even before the router exists, and every new
+    /// capture reads it.
+    pub stt_language: Arc<RwLock<String>>,
+    /// Pasted context for a General meeting. Empty when a project knowledge base is in use.
+    pub meeting_feed: Arc<RwLock<String>>,
+    /// Language the AI assistance buttons answer in, such as "en" or "tr".
+    pub ai_reply_language: Arc<RwLock<String>>,
     pub pause_threshold_ms: Arc<AtomicU64>,
     /// Stop signal for the Live Monitor background thread.
     /// true = thread is running (keep looping); false = thread should stop.
@@ -121,6 +129,9 @@ impl AppState {
             opus_mt_manager: None,
             whisper_config: Arc::new(RwLock::new(DualPassConfig::default())),
             shared_groq_config: Arc::new(RwLock::new(GroqConfig::default())),
+            stt_language: Arc::new(RwLock::new("en-US".to_string())),
+            meeting_feed: Arc::new(RwLock::new(String::new())),
+            ai_reply_language: Arc::new(RwLock::new("en".to_string())),
             pause_threshold_ms: Arc::new(AtomicU64::new(3000)),
             device_monitor_running: Arc::new(AtomicBool::new(false)),
             you_muted: Arc::new(AtomicBool::new(false)),

@@ -1,5 +1,8 @@
 pub mod audio;
+pub mod control;
+pub mod projects;
 pub mod commands;
+pub mod platform;
 pub mod context;
 pub mod credentials;
 pub mod db;
@@ -20,6 +23,7 @@ use tauri::{
 
 // == MODULE COMMANDS: audio ==
 use commands::audio_commands;
+use commands::project_commands;
 // == MODULE COMMANDS: stt ==
 use commands::stt_commands;
 // == MODULE COMMANDS: llm ==
@@ -168,7 +172,6 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_updater::Builder::default().build())
         .setup(|app| {
             let mut app_state = AppState::new();
 
@@ -492,7 +495,8 @@ pub fn run() {
                 }
             }
 
-            log::info!("NexQ initialized successfully");
+            log::info!("zaiqoM initialized successfully");
+            control::start(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -525,6 +529,7 @@ pub fn run() {
             stt_commands::set_pause_threshold,
             stt_commands::get_pause_threshold,
             // == COMMANDS: llm ==
+            llm_commands::sign_in_with_chatgpt,
             llm_commands::set_llm_provider,
             llm_commands::list_models,
             llm_commands::set_active_model,
@@ -533,6 +538,7 @@ pub fn run() {
             llm_commands::list_openrouter_models,
             // == COMMANDS: intelligence ==
             intelligence_commands::generate_assist,
+            intelligence_commands::set_ai_reply_language,
             intelligence_commands::cancel_generation,
             intelligence_commands::set_auto_trigger,
             intelligence_commands::set_context_window_seconds,
@@ -554,6 +560,13 @@ pub fn run() {
             credential_commands::delete_api_key,
             credential_commands::has_api_key,
             // == COMMANDS: meetings ==
+            project_commands::list_projects,
+            project_commands::create_project,
+            project_commands::delete_project,
+            project_commands::set_active_project,
+            project_commands::scan_project,
+            project_commands::set_meeting_feed,
+            meeting_commands::import_meeting_transcript,
             meeting_commands::start_meeting,
             meeting_commands::end_meeting,
             meeting_commands::list_meetings,
@@ -629,10 +642,11 @@ pub fn run() {
             translation_model_commands::delete_opus_mt_model,
             translation_model_commands::activate_opus_mt_model,
             // == COMMANDS: updater ==
+            platform::get_platform_capabilities,
             updater_commands::check_for_update,
             updater_commands::download_and_install_update,
             updater_commands::restart_for_update,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running NexQ");
+        .expect("error while running zaiqoM");
 }

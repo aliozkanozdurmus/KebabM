@@ -5,6 +5,15 @@
 
 // == AUDIO TYPES ==
 
+export interface PlatformCapabilities {
+  os: "windows" | "macos" | "linux" | "unknown";
+  mic_capture: boolean;
+  system_audio: boolean;
+  stealth: boolean;
+  credential_store: boolean;
+  native_stt: boolean;
+}
+
 export type AudioSource = "Mic" | "System" | "Room";
 
 // == MEETING MODE TYPES ==
@@ -105,6 +114,9 @@ export interface MeetingSummary {
   audio_mode?: AudioMode;
   ai_scenario?: AIScenario;
   speaker_count?: number;
+  project_id?: string | null;
+  project_name?: string | null;
+  source?: "live" | "manual" | string;
 }
 
 // == SPEAKER TYPES ==
@@ -264,6 +276,23 @@ export type LLMProviderType =
   | "groq"
   | "gemini"
   | "openrouter"
+  | "xai"
+  | "codex"
+  | "mistral"
+  | "deepseek"
+  | "together"
+  | "fireworks"
+  | "cerebras"
+  | "perplexity"
+  | "cohere"
+  | "sambanova"
+  | "nvidia"
+  | "github"
+  | "moonshot"
+  | "qwen"
+  | "zhipu"
+  | "chatgpt"
+  | "azure"
   | "custom";
 
 export interface LLMProviderConfig {

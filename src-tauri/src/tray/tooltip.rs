@@ -25,9 +25,9 @@ pub fn build_tooltip(
     match state {
         TrayState::Idle => {
             if let Some(text) = custom_text {
-                format!("NexQ — Idle · {}", text)
+                format!("zaiqoM — Idle · {}", text)
             } else {
-                "NexQ — Idle".to_string()
+                "zaiqoM — Idle".to_string()
             }
         }
         TrayState::Recording => {
@@ -35,29 +35,29 @@ pub fn build_tooltip(
                 .map(|s| format_elapsed(s))
                 .unwrap_or_else(|| "00:00".to_string());
             if is_muted {
-                format!("NexQ — Recording (Mic Muted) · {} elapsed", elapsed)
+                format!("zaiqoM — Recording (Mic Muted) · {} elapsed", elapsed)
             } else {
-                format!("NexQ — Recording · {} elapsed", elapsed)
+                format!("zaiqoM — Recording · {} elapsed", elapsed)
             }
         }
         TrayState::Muted => {
             let elapsed = meeting_start
                 .map(|s| format_elapsed(s))
                 .unwrap_or_else(|| "00:00".to_string());
-            format!("NexQ — Recording (Mic Muted) · {} elapsed", elapsed)
+            format!("zaiqoM — Recording (Mic Muted) · {} elapsed", elapsed)
         }
         TrayState::Stealth => {
             let elapsed = meeting_start
                 .map(|s| format_elapsed(s))
                 .unwrap_or_else(|| "00:00".to_string());
-            format!("NexQ — Stealth · {} elapsed", elapsed)
+            format!("zaiqoM — Stealth · {} elapsed", elapsed)
         }
-        TrayState::AiProcessing => "NexQ — AI Processing...".to_string(),
+        TrayState::AiProcessing => "zaiqoM — AI Processing...".to_string(),
         TrayState::Indexing => {
             if let Some(text) = custom_text {
-                format!("NexQ — {}", text)
+                format!("zaiqoM — {}", text)
             } else {
-                "NexQ — Indexing files...".to_string()
+                "zaiqoM — Indexing files...".to_string()
             }
         }
     }

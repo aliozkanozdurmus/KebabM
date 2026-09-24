@@ -17,6 +17,8 @@ export function useSTTStatus() {
 
         if (event.status === "error" && event.message) {
           showToast(`STT (${event.party}): ${event.message}`, "error");
+        } else if (event.status === "fallback" && event.message) {
+          showToast(`STT (${event.party}): ${event.message}`, "info");
         } else if (event.status === "connected") {
           const key = `${event.provider}_${event.party}`;
           if (!connectedRef.current.has(key)) {

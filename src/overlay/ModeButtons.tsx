@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStreamStore } from "../stores/streamStore";
 import { useAIActionsStore } from "../stores/aiActionsStore";
+import { useConfigStore } from "../stores/configStore";
 import { generateAssist, cancelGeneration } from "../lib/ipc";
 import { showToast } from "../stores/toastStore";
 import type { IntelligenceMode } from "../lib/types";
@@ -37,6 +38,32 @@ const MODE_SHORTCUTS: Record<string, string> = {
   AskQuestion: "5",
 };
 
+const AI_REPLY_LANGUAGES = [
+  { code: "en", name: "English" },
+  { code: "tr", name: "Turkish" },
+  { code: "fr", name: "French" },
+  { code: "de", name: "German" },
+  { code: "es", name: "Spanish" },
+  { code: "it", name: "Italian" },
+  { code: "pt", name: "Portuguese" },
+  { code: "nl", name: "Dutch" },
+  { code: "pl", name: "Polish" },
+  { code: "ru", name: "Russian" },
+  { code: "ar", name: "Arabic" },
+  { code: "zh", name: "Chinese" },
+  { code: "ja", name: "Japanese" },
+  { code: "ko", name: "Korean" },
+];
+
+const MODE_HELP: Record<string, string> = {
+  Assist: "Suggest an answer from the project and what was just said.",
+  WhatToSay: "Draft the next thing you can say out loud.",
+  Shorten: "Make the last answer shorter.",
+  FollowUp: "Suggest the next questions to ask.",
+  Recap: "Summarize the meeting so far.",
+  AskQuestion: "Ask the assistant something about this meeting.",
+};
+
 // Ordered built-in modes — AskQuestion now included
 const BUILT_IN_ORDER = ["Assist", "WhatToSay", "Shorten", "FollowUp", "Recap", "AskQuestion"];
 
@@ -44,6 +71,8 @@ export function ModeButtons() {
   const currentMode = useStreamStore((s) => s.currentMode);
   const isStreaming = useStreamStore((s) => s.isStreaming);
   const actions = useAIActionsStore((s) => s.configs.actions);
+  const aiReplyLanguage = useConfigStore((s) => s.aiReplyLanguage);
+  const setAiReplyLanguage = useConfigStore((s) => s.setAiReplyLanguage);
   const [askInputText, setAskInputText] = useState("");
   const [askInputVisible, setAskInputVisible] = useState(false);
 
@@ -116,6 +145,19 @@ export function ModeButtons() {
 
   return (
     <div className="flex flex-col gap-1">
+      <label className="flex items-center gap-2 px-1 text-[11px] text-muted-foreground" title="Assist, Say, Short, Follow-up, and Recap answer in this language. You can change it while the meeting is running.">
+        <span>AI replies in</span>
+        <select
+          value={aiReplyLanguage || "en"}
+          onChange={(event) => setAiReplyLanguage(event.target.value)}
+          aria-label="AI reply language"
+          className="bg-transparent text-[11px] text-foreground"
+        >
+          {AI_REPLY_LANGUAGES.map((language) => (
+            <option key={language.code} value={language.code}>{language.name}</option>
+          ))}
+        </select>
+      </label>
       <div className="flex flex-wrap items-center gap-0.5">
         {visibleModes.map(({ mode, label, shortcut, icon: Icon, isCustom }) => {
           const isActive = currentMode === mode && isStreaming;
@@ -125,6 +167,7 @@ export function ModeButtons() {
               key={mode}
               onClick={() => handleClick(mode)}
               disabled={isStreaming && !isActive}
+              title={MODE_HELP[mode] || `${label}. Run this assistant action.`}
               aria-label={shortcut ? `${label} (${shortcut})` : label}
               aria-pressed={isActive || isAskActive}
               className={`flex items-center gap-1 rounded-lg px-2 py-1 text-meta font-medium transition-all duration-150 cursor-pointer ${
@@ -167,6 +210,7 @@ export function ModeButtons() {
             disabled={!askInputText.trim()}
             className="rounded-md p-1 text-info/60 hover:bg-info/10 hover:text-info disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             aria-label="Send question"
+            title="Send this question to the assistant."
           >
             <Send className="h-3 w-3" aria-hidden="true" />
           </button>
@@ -174,6 +218,7 @@ export function ModeButtons() {
             onClick={() => setAskInputVisible(false)}
             className="rounded-md p-1 text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground transition-colors"
             aria-label="Close question input"
+            title="Close the question box."
           >
             <X className="h-3 w-3" aria-hidden="true" />
           </button>

@@ -1,4 +1,4 @@
-use tauri::{command, State};
+use tauri::{command, Manager, State};
 
 use crate::llm::{LLMRouter, ProviderConfig};
 use crate::llm::openrouter_models;
@@ -34,11 +34,17 @@ pub async fn set_llm_provider(
         .lock()
         .map_err(|e| format!("Failed to lock LLM router: {}", e))?;
 
+    if let Some(credentials) = state.credentials.clone() {
+        router.set_credentials(credentials);
+    }
+    let config = attach_chatgpt_session(config, &state)?;
+    let provider_type = config.provider_type.clone();
+
     router
         .set_provider(config)
         .map_err(|e| format!("Failed to set provider: {}", e))?;
 
-    log::info!("LLM provider set to: {}", provider);
+    log::info!("LLM provider set to {}", provider_type);
     Ok(())
 }
 
@@ -62,6 +68,10 @@ pub async fn list_models(
 
         // If a config was provided, set up the provider
         if let Some(config) = config {
+            if let Some(credentials) = state.credentials.clone() {
+                router.set_credentials(credentials);
+            }
+            let config = attach_chatgpt_session(config, &state)?;
             router
                 .set_provider(config)
                 .map_err(|e| format!("Failed to set provider: {}", e))?;
@@ -120,6 +130,10 @@ pub async fn test_llm_connection(
             .map_err(|e| format!("Failed to lock LLM router: {}", e))?;
 
         if let Some(config) = config {
+            if let Some(credentials) = state.credentials.clone() {
+                router.set_credentials(credentials);
+            }
+            let config = attach_chatgpt_session(config, &state)?;
             router
                 .set_provider(config)
                 .map_err(|e| format!("Failed to set provider: {}", e))?;
@@ -135,6 +149,45 @@ pub async fn test_llm_connection(
         .test_connection()
         .await
         .map_err(|e| format!("Connection test failed: {}", e))
+}
+
+fn attach_chatgpt_session(
+    mut config: ProviderConfig,
+    state: &AppState,
+) -> Result<ProviderConfig, String> {
+    if config.provider_type != "chatgpt" || config.api_key.is_some() {
+        return Ok(config);
+    }
+    let Some(credentials) = state.credentials.as_ref() else {
+        return Err("Sign in with ChatGPT first".to_string());
+    };
+    let guard = credentials
+        .lock()
+        .map_err(|_| "Credential store lock failed".to_string())?;
+    let session = crate::llm::chatgpt_auth::load_session(&guard)?
+        .ok_or_else(|| "Sign in with ChatGPT first".to_string())?;
+    config.api_key = Some(session.access_token);
+    config.auth_value = Some(session.refresh_token);
+    config.auth_header = Some(session.account_id);
+    Ok(config)
+}
+
+#[command]
+pub async fn sign_in_with_chatgpt(app: tauri::AppHandle) -> Result<(), String> {
+    let session = crate::llm::chatgpt_auth::sign_in_with_browser(&app).await?;
+    let state = app.state::<AppState>();
+    let credentials = state
+        .credentials
+        .as_ref()
+        .ok_or_else(|| "Credential store is not ready".to_string())?;
+    {
+        let guard = credentials
+            .lock()
+            .map_err(|_| "Credential store lock failed".to_string())?;
+        crate::llm::chatgpt_auth::store_session(&guard, &session)?;
+    }
+    log::info!("ChatGPT subscription sign-in completed");
+    Ok(())
 }
 
 #[command]

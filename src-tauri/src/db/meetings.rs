@@ -41,6 +41,14 @@ pub struct Meeting {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     pub recording_offset_ms: Option<i64>,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default = "live_source")]
+    pub source: String,
+}
+
+fn live_source() -> String {
+    "live".to_string()
 }
 
 /// Response struct that maps MeetingSpeaker back to frontend SpeakerIdentity format.
@@ -90,6 +98,12 @@ pub struct MeetingSummary {
     pub has_summary: bool,
     pub audio_mode: String,
     pub ai_scenario: String,
+    #[serde(default)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    pub project_name: Option<String>,
+    #[serde(default = "live_source")]
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,14 +138,19 @@ pub struct MeetingUpdate {
 // ── CRUD operations ──────────────────────────────────────────────────────────
 
 /// Create a new meeting with a UUID and the current timestamp.
-pub fn create_meeting(conn: &Connection, title: &str) -> Result<Meeting, DatabaseError> {
+pub fn create_meeting(
+    conn: &Connection,
+    title: &str,
+    project_id: Option<&str>,
+    source: &str,
+) -> Result<Meeting, DatabaseError> {
     let id = Uuid::new_v4().to_string();
     let start_time = chrono::Utc::now().to_rfc3339();
 
     conn.execute(
-        "INSERT INTO meetings (id, title, start_time, transcript, ai_interactions)
-         VALUES (?1, ?2, ?3, '[]', '[]')",
-        params![id, title, start_time],
+        "INSERT INTO meetings (id, title, start_time, transcript, ai_interactions, project_id, source)
+         VALUES (?1, ?2, ?3, '[]', '[]', ?4, ?5)",
+        params![id, title, start_time, project_id, source],
     )?;
 
     Ok(Meeting {
@@ -152,6 +171,8 @@ pub fn create_meeting(conn: &Connection, title: &str) -> Result<Meeting, Databas
         recording_size: None,
         waveform_path: None,
         recording_offset_ms: None,
+        project_id: project_id.map(|s| s.to_string()),
+        source: source.to_string(),
     })
 }
 
@@ -160,7 +181,8 @@ pub fn get_meeting(conn: &Connection, id: &str) -> Result<Meeting, DatabaseError
     let mut stmt = conn.prepare(
         "SELECT id, title, start_time, end_time, duration_seconds,
                 transcript, ai_interactions, summary, config_snapshot,
-                recording_path, recording_size, waveform_path, recording_offset_ms
+                recording_path, recording_size, waveform_path, recording_offset_ms,
+                project_id, source
          FROM meetings WHERE id = ?1",
     )?;
 
@@ -190,6 +212,8 @@ pub fn get_meeting(conn: &Connection, id: &str) -> Result<Meeting, DatabaseError
                 recording_size: row.get(10)?,
                 waveform_path: row.get(11)?,
                 recording_offset_ms: row.get(12)?,
+                project_id: row.get(13)?,
+                source: row.get::<_, String>(14).unwrap_or_else(|_| "live".to_string()),
             })
         })
         .map_err(|e| match e {
@@ -242,8 +266,9 @@ pub fn list_meetings(
         "SELECT m.id, m.title, m.start_time, m.end_time, m.duration_seconds,
                 (SELECT COUNT(*) FROM transcript_segments ts WHERE ts.meeting_id = m.id) AS segment_count,
                 CASE WHEN m.summary IS NOT NULL AND m.summary != '' THEN 1 ELSE 0 END AS has_summary,
-                m.audio_mode, m.ai_scenario
+                m.audio_mode, m.ai_scenario, m.project_id, p.name, m.source
          FROM meetings m
+         LEFT JOIN projects p ON p.id = m.project_id
          ORDER BY m.start_time DESC
          LIMIT ?1 OFFSET ?2",
     )?;
@@ -259,6 +284,9 @@ pub fn list_meetings(
             has_summary: row.get::<_, i32>(6)? != 0,
             audio_mode: row.get::<_, String>(7).unwrap_or_else(|_| "online".to_string()),
             ai_scenario: row.get::<_, String>(8).unwrap_or_else(|_| "team_meeting".to_string()),
+            project_id: row.get(9)?,
+            project_name: row.get(10)?,
+            source: row.get::<_, String>(11).unwrap_or_else(|_| "live".to_string()),
         })
     })?;
 
@@ -411,8 +439,9 @@ pub fn search_meetings(
         "SELECT DISTINCT m.id, m.title, m.start_time, m.end_time, m.duration_seconds,
                 (SELECT COUNT(*) FROM transcript_segments ts WHERE ts.meeting_id = m.id) AS segment_count,
                 CASE WHEN m.summary IS NOT NULL AND m.summary != '' THEN 1 ELSE 0 END AS has_summary,
-                m.audio_mode, m.ai_scenario
+                m.audio_mode, m.ai_scenario, m.project_id, p.name, m.source
          FROM meetings m
+         LEFT JOIN projects p ON p.id = m.project_id
          LEFT JOIN transcript_segments ts ON ts.meeting_id = m.id
          WHERE m.title LIKE ?1
             OR ts.text LIKE ?1
@@ -432,6 +461,9 @@ pub fn search_meetings(
             has_summary: row.get::<_, i32>(6)? != 0,
             audio_mode: row.get::<_, String>(7).unwrap_or_else(|_| "online".to_string()),
             ai_scenario: row.get::<_, String>(8).unwrap_or_else(|_| "team_meeting".to_string()),
+            project_id: row.get(9)?,
+            project_name: row.get(10)?,
+            source: row.get::<_, String>(11).unwrap_or_else(|_| "live".to_string()),
         })
     })?;
 
@@ -440,6 +472,143 @@ pub fn search_meetings(
         results.push(row?);
     }
     Ok(results)
+}
+
+/// Save a pasted transcript as a finished meeting on a project.
+pub fn import_transcript(
+    conn: &Connection,
+    project_id: &str,
+    title: &str,
+    raw: &str,
+) -> Result<Meeting, DatabaseError> {
+    let lines = parse_transcript_lines(raw);
+    if lines.is_empty() {
+        return Err(DatabaseError::Query("Transcript is empty".to_string()));
+    }
+    let meeting = create_meeting(conn, title, Some(project_id), "manual")?;
+    let now = chrono::Utc::now().to_rfc3339();
+    for (index, (speaker, text, timestamp_ms)) in lines.iter().enumerate() {
+        let segment = TranscriptSegment {
+            id: format!("{}-{}", meeting.id, index + 1),
+            meeting_id: meeting.id.clone(),
+            text: text.clone(),
+            speaker: speaker.clone(),
+            speaker_id: None,
+            timestamp_ms: *timestamp_ms,
+            is_final: true,
+            confidence: 1.0,
+            created_at: now.clone(),
+        };
+        append_transcript_segment(conn, &meeting.id, &segment)?;
+    }
+    let duration = lines.last().map(|line| line.2 / 1000).unwrap_or(0);
+    let end_time = chrono::Utc::now().to_rfc3339();
+    update_meeting(
+        conn,
+        &meeting.id,
+        &MeetingUpdate {
+            title: None,
+            end_time: Some(end_time),
+            duration_seconds: Some(duration),
+            transcript: None,
+            ai_interactions: None,
+            summary: None,
+            config_snapshot: None,
+            recording_path: None,
+            recording_size: None,
+            waveform_path: None,
+            recording_offset_ms: None,
+        },
+    )?;
+    get_meeting(conn, &meeting.id)
+}
+
+fn parse_transcript_lines(raw: &str) -> Vec<(String, String, i64)> {
+    let mut out = Vec::new();
+    let mut clock = 0i64;
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let (stamp, rest) = split_stamp(line);
+        if let Some(ms) = stamp {
+            clock = ms;
+        } else {
+            clock += 5_000;
+        }
+        let (speaker, text) = split_speaker(rest);
+        if text.is_empty() {
+            continue;
+        }
+        out.push((speaker, text, clock));
+    }
+    out
+}
+
+fn split_stamp(line: &str) -> (Option<i64>, &str) {
+    let trimmed = line.trim_start_matches('[').trim_start();
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    let head = parts.next().unwrap_or("");
+    let tail = parts.next().unwrap_or("").trim();
+    let head = head.trim_end_matches(']');
+    if let Some(ms) = parse_clock(head) {
+        (Some(ms), if tail.is_empty() { line } else { tail })
+    } else {
+        (None, line)
+    }
+}
+
+fn parse_clock(value: &str) -> Option<i64> {
+    let bits: Vec<&str> = value.split(':').collect();
+    let nums: Vec<i64> = bits.iter().filter_map(|b| b.parse().ok()).collect();
+    if nums.len() != bits.len() || nums.is_empty() || nums.len() > 3 {
+        return None;
+    }
+    let ms = match nums.as_slice() {
+        [m, s] => (m * 60 + s) * 1000,
+        [h, m, s] => (h * 3600 + m * 60 + s) * 1000,
+        _ => return None,
+    };
+    Some(ms)
+}
+
+#[cfg(test)]
+mod transcript_import_tests {
+    use super::{parse_clock, parse_transcript_lines, split_speaker};
+
+    #[test]
+    fn parses_speaker_lines_and_clocks() {
+        let lines = parse_transcript_lines(
+            "Ali: We ship login on Friday.\n00:12 Sam: Who owns the API?\n\nJust a note",
+        );
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].0, "Ali");
+        assert_eq!(lines[0].2, 5_000);
+        assert_eq!(lines[1].0, "Sam");
+        assert_eq!(lines[1].2, 12_000);
+        assert_eq!(lines[2].0, "Unknown");
+        assert_eq!(lines[2].1, "Just a note");
+    }
+
+    #[test]
+    fn parses_hour_clock_and_rejects_long_speaker() {
+        assert_eq!(parse_clock("1:02:03"), Some(3_723_000));
+        let (speaker, text) = split_speaker("this speaker name is definitely longer than forty characters: hello");
+        assert_eq!(speaker, "Unknown");
+        assert!(text.contains("hello"));
+    }
+}
+
+fn split_speaker(line: &str) -> (String, String) {
+    if let Some((speaker, text)) = line.split_once(':') {
+        let speaker = speaker.trim();
+        let text = text.trim();
+        if !speaker.is_empty() && speaker.len() <= 40 && !text.is_empty() {
+            return (speaker.to_string(), text.to_string());
+        }
+    }
+    ("Unknown".to_string(), line.trim().to_string())
 }
 
 /// Append a single transcript segment (used for incremental 30s saves).

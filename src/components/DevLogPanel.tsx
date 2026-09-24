@@ -16,7 +16,7 @@ async function openDetachedDevLog() {
     const devUrl = `${window.location.origin}${window.location.pathname}?view=devlog`;
     new WebviewWindow("devlog", {
       url: devUrl,
-      title: "NexQ Dev Log",
+      title: "zaiqoM Dev Log",
       width: 700,
       height: 450,
       resizable: true,

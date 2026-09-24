@@ -1,10 +1,11 @@
 import type { MeetingSummary } from "../lib/types";
-import { getDateGroup } from "../lib/utils";
+import type { ProjectRecord } from "../lib/ipc";
 import { MeetingCard } from "./MeetingCard";
 import { Mic } from "lucide-react";
 
 interface RecentMeetingsProps {
   meetings: MeetingSummary[];
+  projects?: ProjectRecord[];
   onSelect: (meetingId: string) => void;
   onDelete: (meetingId: string) => void;
   onRename: (meetingId: string, newTitle: string) => void;
@@ -13,38 +14,36 @@ interface RecentMeetingsProps {
   activeMeetingId?: string | null;
 }
 
-/** Groups meetings by date category: Today, Yesterday, This Week, Earlier */
-function groupMeetingsByDate(
+const UNASSIGNED = "No project";
+
+/** Groups meetings under their project. Meetings without a project come last. */
+function groupMeetingsByProject(
   meetings: MeetingSummary[]
 ): Map<string, MeetingSummary[]> {
-  const groups = new Map<string, MeetingSummary[]>();
-  const order = ["Today", "Yesterday", "This Week", "Earlier"];
-
-  for (const label of order) {
-    groups.set(label, []);
-  }
+  const named = new Map<string, MeetingSummary[]>();
+  const unassigned: MeetingSummary[] = [];
 
   for (const meeting of meetings) {
-    const group = getDateGroup(meeting.start_time);
-    const list = groups.get(group);
-    if (list) {
-      list.push(meeting);
-    } else {
-      groups.set(group, [meeting]);
+    const label = meeting.project_name?.trim();
+    if (!label) {
+      unassigned.push(meeting);
+      continue;
     }
+    const list = named.get(label) ?? [];
+    list.push(meeting);
+    named.set(label, list);
   }
 
-  for (const [key, value] of groups) {
-    if (value.length === 0) {
-      groups.delete(key);
-    }
-  }
-
+  const groups = new Map(
+    [...named.entries()].sort(([a], [b]) => a.localeCompare(b))
+  );
+  if (unassigned.length > 0) groups.set(UNASSIGNED, unassigned);
   return groups;
 }
 
 export function RecentMeetings({
   meetings,
+  projects = [],
   onSelect,
   onDelete,
   onRename,
@@ -52,7 +51,12 @@ export function RecentMeetings({
   onToggleFavorite,
   activeMeetingId,
 }: RecentMeetingsProps) {
-  if (meetings.length === 0) {
+  const grouped = groupMeetingsByProject(meetings);
+  for (const project of [...projects].sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!grouped.has(project.name)) grouped.set(project.name, []);
+  }
+
+  if (meetings.length === 0 && projects.length === 0) {
     return (
       <div className="dash-main flex flex-col items-center justify-center rounded-2xl border border-border/20 bg-secondary/10 py-14">
         <div className="mb-3 rounded-full bg-primary/10 p-3.5">
@@ -62,13 +66,11 @@ export function RecentMeetings({
           No meetings yet
         </p>
         <p className="mt-1 text-meta text-muted-foreground/60">
-          Start a meeting to see it here
+          Add a project, then start a meeting
         </p>
       </div>
     );
   }
-
-  const grouped = groupMeetingsByDate(meetings);
 
   // Running counter for staggered card entrance across all groups
   let cardIndex = 0;
@@ -81,6 +83,13 @@ export function RecentMeetings({
             {dateGroup}
           </h3>
           <div className="space-y-1.5">
+            {groupMeetings.length === 0 && (
+              <p className="whitespace-pre-wrap px-2 py-2 text-xs text-foreground/80">
+                {(projects.find((project) => project.name === dateGroup)?.brief || "No meetings yet.")
+                  .replace(/^#+\s*/gm, "")
+                  .slice(0, 700)}
+              </p>
+            )}
             {groupMeetings.map((meeting) => {
               const idx = cardIndex++;
               return (

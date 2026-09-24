@@ -122,7 +122,37 @@ impl LLMProvider for OpenAICompatClient {
         let request = self.apply_auth(self.client.get(&url));
 
         let response = request.send().await?;
-        Ok(response.status().is_success())
+        if response.status().is_success() {
+            return Ok(true);
+        }
+        if response.status().as_u16() == 401 || response.status().as_u16() == 403 {
+            let body = response.text().await.unwrap_or_default();
+            return Err(LLMError::AuthError(format!(
+                "Authentication failed: {}",
+                body
+            )));
+        }
+
+        // Some providers have no public /models route. A one-token chat call
+        // still proves the key and the base URL.
+        let probe = probe_model(&self.config.provider_name);
+        let chat_url = format!("{}/chat/completions", self.config.base_url);
+        let chat = self.apply_auth(self.client.post(&chat_url).json(&json!({
+            "model": probe,
+            "messages": [{"role": "user", "content": "ok"}],
+            "max_tokens": 1,
+            "stream": false
+        })));
+        let chat_response = chat.send().await?;
+        if chat_response.status().is_success() {
+            return Ok(true);
+        }
+        let status = chat_response.status();
+        let body = chat_response.text().await.unwrap_or_default();
+        Err(LLMError::ProviderError(format!(
+            "Connection test failed ({}): {}",
+            status, body
+        )))
     }
 
     async fn stream_completion(
@@ -265,6 +295,23 @@ impl LLMProvider for OpenAICompatClient {
     }
 }
 
+fn probe_model(provider: &str) -> &'static str {
+    match provider {
+        "xai" => "grok-4.7",
+        "codex" => "gpt-5.5",
+        "openai" => "gpt-4o-mini",
+        "mistral" => "mistral-small-latest",
+        "deepseek" => "deepseek-chat",
+        "perplexity" => "sonar",
+        "cerebras" => "llama-3.3-70b",
+        "moonshot" => "kimi-latest",
+        "qwen" => "qwen-plus",
+        "zhipu" => "glm-4.5",
+        "cohere" => "command-r",
+        _ => "gpt-4o-mini",
+    }
+}
+
 /// Create an OpenAI client (api.openai.com)
 pub fn create_openai_client(api_key: &str) -> OpenAICompatClient {
     OpenAICompatClient::new(OpenAICompatConfig {
@@ -296,8 +343,49 @@ pub fn create_openrouter_client(api_key: &str) -> OpenAICompatClient {
         auth_value: Some(format!("Bearer {}", api_key)),
         extra_headers: vec![
             ("HTTP-Referer".to_string(), "https://nexq.app".to_string()),
-            ("X-Title".to_string(), "NexQ".to_string()),
+            ("X-Title".to_string(), "zaiqoM".to_string()),
         ],
+    })
+}
+
+/// API-key header client. Azure OpenAI uses the `api-key` header.
+pub fn create_api_key_client(
+    provider_name: &str,
+    base_url: &str,
+    api_key: &str,
+    header_name: &str,
+) -> OpenAICompatClient {
+    OpenAICompatClient::new(OpenAICompatConfig {
+        provider_name: provider_name.to_string(),
+        base_url: base_url.trim_end_matches('/').to_string(),
+        auth_header: Some(header_name.to_string()),
+        auth_value: Some(api_key.to_string()),
+        extra_headers: vec![],
+    })
+}
+
+pub fn normalize_azure_base_url(url: &str) -> String {
+    let trimmed = url.trim().trim_end_matches('/');
+    if trimmed.contains("/openai/") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/openai/v1")
+    }
+}
+
+/// Bearer-token client for any OpenAI-compatible chat completions API.
+pub fn create_bearer_client(provider_name: &str, base_url: &str, api_key: &str) -> OpenAICompatClient {
+    let mut extra_headers = Vec::new();
+    if provider_name == "openrouter" {
+        extra_headers.push(("HTTP-Referer".to_string(), "https://nexq.app".to_string()));
+        extra_headers.push(("X-Title".to_string(), "zaiqoM".to_string()));
+    }
+    OpenAICompatClient::new(OpenAICompatConfig {
+        provider_name: provider_name.to_string(),
+        base_url: base_url.trim_end_matches('/').to_string(),
+        auth_header: Some("Authorization".to_string()),
+        auth_value: Some(format!("Bearer {}", api_key)),
+        extra_headers,
     })
 }
 

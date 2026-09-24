@@ -1,0 +1,13 @@
+[mcp_servers.zaiqo]
+command = "node"
+args = ["mcp/server.mjs"]
+enabled = true
+startup_timeout_sec = 20
+tool_timeout_sec = 120
+
+[mcp_servers.zaiqo.tool_timeouts]
+scan_project = 600
+sign_in_chatgpt = 300
+test_llm = 90
+list_models = 90
+configure_llm = 90

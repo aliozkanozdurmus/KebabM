@@ -2,20 +2,20 @@
 // "you" and "them" use existing colors; diarized speakers assigned in order
 
 export const SPEAKER_COLORS = [
-  "#f97316", // orange (also used for "them" in online)
-  "#22c55e", // green (also used for "you" in online)
-  "#3b82f6", // blue
-  "#eab308", // yellow
-  "#ec4899", // pink
-  "#14b8a6", // teal
-  "#ef4444", // red
-  "#6366f1", // indigo
+  "#0f62fe",
+  "#0043ce",
+  "#78a9ff",
+  "#24a148",
+  "#f1c21b",
+  "#da1e28",
+  "#525252",
+  "#002d9c",
 ] as const;
 
 export const FIXED_SPEAKER_COLORS: Record<string, string> = {
-  you: "#22c55e",
-  them: "#f97316",
-  room: "#a855f7",
+  you: "#0f62fe",
+  them: "#525252",
+  room: "#161616",
 };
 
 export function getSpeakerColor(speakerId: string, orderIndex: number): string {
@@ -27,6 +27,6 @@ export function getSpeakerColor(speakerId: string, orderIndex: number): string {
 
 // Badge colors for audio mode
 export const MODE_COLORS = {
-  online: { text: "#4a6cf7", bg: "rgba(74,108,247,0.15)" },
-  in_person: { text: "#a855f7", bg: "rgba(168,85,247,0.15)" },
+  online: { text: "#0f62fe", bg: "#edf5ff" },
+  in_person: { text: "#161616", bg: "#e0e0e0" },
 } as const;

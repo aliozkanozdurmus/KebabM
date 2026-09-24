@@ -4,7 +4,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useUpdaterStore } from "../stores/updaterStore";
 import {
-  checkForUpdate,
   downloadAndInstallUpdate,
   restartForUpdate,
 } from "../lib/ipc";
@@ -17,8 +16,6 @@ import type { UnlistenFn } from "@tauri-apps/api/event";
 
 const STORE_NAME = "nexq-settings.json";
 const SKIPPED_VERSION_KEY = "skipped_version";
-const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
-const STARTUP_DELAY_MS = 3000;
 
 export function useUpdater() {
   const store = useUpdaterStore();
@@ -27,50 +24,9 @@ export function useUpdater() {
 
   // -- performCheck ----------------------------------------------------------
 
-  const performCheck = useCallback(
-    async (opts?: { ignoreSkipped?: boolean }) => {
-      const {
-        setCheckStatus,
-        setAvailableUpdate,
-        setCheckError,
-        skippedVersion,
-      } = useUpdaterStore.getState();
-
-      setCheckStatus("checking");
-      setCheckError(null);
-
-      try {
-        const update = await checkForUpdate();
-
-        if (!mountedRef.current) return;
-
-        if (update) {
-          const isSkipped =
-            !opts?.ignoreSkipped && skippedVersion === update.version;
-
-          if (isSkipped) {
-            setCheckStatus("up-to-date");
-            setAvailableUpdate(null);
-          } else {
-            setAvailableUpdate(update);
-          }
-        } else {
-          setCheckStatus("up-to-date");
-          setAvailableUpdate(null);
-        }
-      } catch (err: unknown) {
-        if (!mountedRef.current) return;
-        const msg =
-          typeof err === "string"
-            ? err
-            : err instanceof Error
-              ? err.message
-              : "Unknown error";
-        setCheckError(msg);
-      }
-    },
-    [],
-  );
+  const performCheck = useCallback(async () => {
+    return;
+  }, []);
 
   // -- startDownload ---------------------------------------------------------
 
@@ -132,8 +88,6 @@ export function useUpdater() {
 
     let unlistenProgress: UnlistenFn | null = null;
     let unlistenReady: UnlistenFn | null = null;
-    let startupTimer: ReturnType<typeof setTimeout> | null = null;
-    let intervalId: ReturnType<typeof setInterval> | null = null;
 
     // Load persisted skipped version
     load(STORE_NAME, { autoSave: true, defaults: {} })
@@ -165,26 +119,10 @@ export function useUpdater() {
       unlistenReady = fn;
     });
 
-    // Startup check after delay
-    startupTimer = setTimeout(() => {
-      if (mountedRef.current) {
-        performCheck();
-      }
-    }, STARTUP_DELAY_MS);
-
-    // Periodic check every 4 hours
-    intervalId = setInterval(() => {
-      if (mountedRef.current) {
-        performCheck();
-      }
-    }, CHECK_INTERVAL_MS);
-
     return () => {
       mountedRef.current = false;
       unlistenProgress?.();
       unlistenReady?.();
-      if (startupTimer) clearTimeout(startupTimer);
-      if (intervalId) clearInterval(intervalId);
     };
   }, [performCheck]);
 

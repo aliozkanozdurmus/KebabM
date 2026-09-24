@@ -227,6 +227,12 @@ export function MeetingCard({
               </span>
             )}
 
+            {meeting.project_name && (
+              <span className="text-meta text-primary">{meeting.project_name}</span>
+            )}
+            {meeting.source === "manual" && (
+              <span className="text-meta text-muted-foreground">Pasted</span>
+            )}
             {meeting.segment_count > 0 && (
               <span className="flex items-center gap-0.5 text-meta tabular-nums text-muted-foreground/60">
                 <MessageSquare className="h-2.5 w-2.5" />

@@ -118,7 +118,7 @@ export function FirstRunWizard() {
       <header className="flex items-center justify-between border-b border-border/20 px-8 py-4">
         <div className="flex items-center gap-2.5">
           <span className="text-base font-bold tracking-tight text-foreground">
-            NexQ
+            zaiqoM
           </span>
           <span className="text-sm text-muted-foreground/60 font-medium">
             Setup

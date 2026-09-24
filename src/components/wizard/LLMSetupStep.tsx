@@ -52,8 +52,22 @@ const CLOUD_PROVIDERS: ProviderCard[] = [
   {
     type: "openai",
     label: "OpenAI",
-    description: "GPT-4o, GPT-4, etc.",
+    description: "API key for GPT models",
     icon: <Sparkles className="h-5 w-5" />,
+    requiresKey: true,
+  },
+  {
+    type: "chatgpt",
+    label: "ChatGPT",
+    description: "Sign in with your subscription",
+    icon: <Sparkles className="h-5 w-5" />,
+    requiresKey: false,
+  },
+  {
+    type: "azure",
+    label: "Azure OpenAI",
+    description: "Your Azure resource",
+    icon: <Cloud className="h-5 w-5" />,
     requiresKey: true,
   },
   {
@@ -61,6 +75,48 @@ const CLOUD_PROVIDERS: ProviderCard[] = [
     label: "Groq",
     description: "Ultra-fast inference",
     icon: <Zap className="h-5 w-5" />,
+    requiresKey: true,
+  },
+  {
+    type: "xai",
+    label: "Grok",
+    description: "xAI Grok 4.7",
+    icon: <Sparkles className="h-5 w-5" />,
+    requiresKey: true,
+  },
+  {
+    type: "codex",
+    label: "Codex",
+    description: "OpenAI Codex, gpt-5.5",
+    icon: <Sparkles className="h-5 w-5" />,
+    requiresKey: true,
+  },
+  {
+    type: "mistral",
+    label: "Mistral",
+    description: "Mistral Large",
+    icon: <Cloud className="h-5 w-5" />,
+    requiresKey: true,
+  },
+  {
+    type: "deepseek",
+    label: "DeepSeek",
+    description: "DeepSeek chat",
+    icon: <Cloud className="h-5 w-5" />,
+    requiresKey: true,
+  },
+  {
+    type: "gemini",
+    label: "Gemini",
+    description: "Google Gemini",
+    icon: <Cloud className="h-5 w-5" />,
+    requiresKey: true,
+  },
+  {
+    type: "openrouter",
+    label: "OpenRouter",
+    description: "Many models, one key",
+    icon: <Cloud className="h-5 w-5" />,
     requiresKey: true,
   },
 ];
@@ -377,7 +433,7 @@ export function LLMSetupStep({
             <span className="font-medium text-foreground">Tip: </span>
             {hasLocalLLM
               ? "For privacy and speed, we recommend using Ollama with llama3.2. Your conversations never leave your machine."
-              : "For the best experience, we recommend Anthropic Claude. For local privacy, install Ollama and run it before starting NexQ."}
+              : "For the best experience, we recommend Anthropic Claude. For local privacy, install Ollama and run it before starting zaiqoM."}
           </p>
         </div>
       </div>

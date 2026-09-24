@@ -45,7 +45,7 @@ export function GeneralSettings() {
           <div>
             <label className="text-sm font-medium text-foreground">Theme</label>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Choose your preferred appearance
+              Light is a white window. Dark is gray. System follows Windows.
             </p>
           </div>
           <div className="flex rounded-lg border border-border/50 bg-secondary/30 p-0.5">
@@ -107,7 +107,7 @@ export function GeneralSettings() {
               Start on Login
             </label>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Launch NexQ automatically when you log in
+              Launch zaiqoM automatically when you log in
             </p>
           </div>
           <button

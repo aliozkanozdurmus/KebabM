@@ -121,6 +121,38 @@ function App() {
     });
   }, []);
 
+  // Control server: start and end a meeting from the window that owns that flow.
+  useEffect(() => {
+    if (!windowLabel) return;
+    let unlisten: (() => void) | undefined;
+    if (windowLabel === "launcher") {
+      listen<{ title?: string; audio_mode?: AudioMode; scenario?: AIScenario }>(
+        "zaiqo:start-meeting",
+        (event) => {
+          const payload = event.payload ?? {};
+          useMeetingStore
+            .getState()
+            .startMeetingFlow(payload.title, payload.audio_mode, payload.scenario)
+            .catch((err) => console.error("[App] Control start meeting failed:", err));
+        }
+      ).then((fn) => {
+        unlisten = fn;
+      });
+    } else if (windowLabel === "overlay") {
+      listen("zaiqo:end-meeting", () => {
+        useMeetingStore
+          .getState()
+          .endMeetingFlow()
+          .catch((err) => console.error("[App] Control end meeting failed:", err));
+      }).then((fn) => {
+        unlisten = fn;
+      });
+    }
+    return () => {
+      unlisten?.();
+    };
+  }, [windowLabel]);
+
   // LAUNCHER window: when meeting starts, show overlay Tauri window and hide self
   useEffect(() => {
     if (windowLabel !== "launcher") return;
@@ -285,7 +317,7 @@ function App() {
             <div className="h-8 w-8 rounded-xl bg-primary/10 flex items-center justify-center">
               <div className="h-3 w-3 rounded-full bg-primary/40 animate-pulse" />
             </div>
-            <div className="text-sm text-muted-foreground">Starting NexQ...</div>
+            <div className="text-sm text-muted-foreground">Starting zaiqoM...</div>
           </div>
         )}
       </div>
@@ -301,7 +333,7 @@ function App() {
   if (isOverlayWindow) {
     return (
       <div className="h-screen w-screen overflow-hidden bg-transparent text-foreground">
-        <ErrorBoundary fallbackMessage="NexQ encountered an error">
+        <ErrorBoundary fallbackMessage="zaiqoM encountered an error">
           {currentView === "overlay" && (
             <ErrorBoundary fallbackMessage="Failed to load overlay">
               <div className="flex h-full">
@@ -324,7 +356,7 @@ function App() {
 
   return (
     <div className={`h-screen w-screen overflow-hidden text-foreground ${resolvedView === "overlay" ? "bg-transparent" : "bg-background"}`}>
-      <ErrorBoundary fallbackMessage="NexQ encountered an error">
+      <ErrorBoundary fallbackMessage="zaiqoM encountered an error">
         {resolvedView === "launcher" && (
           <ErrorBoundary fallbackMessage="Failed to load launcher">
             <LauncherView />

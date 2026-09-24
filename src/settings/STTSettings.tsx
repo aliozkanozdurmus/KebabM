@@ -13,6 +13,7 @@ import {
 } from "../lib/ipc";
 import { storeApiKey, getApiKey, hasApiKey } from "../lib/ipc";
 import type { STTProviderType, LocalSTTEngineInfo, DeepgramConfig, GroqConfig } from "../lib/types";
+import { STT_LANGUAGES as LANGUAGES } from "../lib/sttLanguages";
 import {
   CheckCircle,
   XCircle,
@@ -141,26 +142,6 @@ const PROVIDER_OPTIONS: ProviderOption[] = [
     isLocal: false,
     credentialKey: "groq_whisper",
   },
-];
-
-const LANGUAGES = [
-  { value: "en-US", label: "English (US)" },
-  { value: "en-GB", label: "English (UK)" },
-  { value: "es-ES", label: "Spanish" },
-  { value: "fr-FR", label: "French" },
-  { value: "de-DE", label: "German" },
-  { value: "it-IT", label: "Italian" },
-  { value: "pt-BR", label: "Portuguese (Brazil)" },
-  { value: "ja-JP", label: "Japanese" },
-  { value: "zh-CN", label: "Chinese (Simplified)" },
-  { value: "ko-KR", label: "Korean" },
-  { value: "nl-NL", label: "Dutch" },
-  { value: "hi-IN", label: "Hindi" },
-  { value: "ru-RU", label: "Russian" },
-  { value: "ar-SA", label: "Arabic" },
-  { value: "tr-TR", label: "Turkish" },
-  { value: "pl-PL", label: "Polish" },
-  { value: "sv-SE", label: "Swedish" },
 ];
 
 // ── Deepgram Models ──
@@ -1624,7 +1605,7 @@ function GroqAdvancedSettings() {
             <textarea
               value={groqConfig.prompt}
               onChange={(e) => updateField("prompt", e.target.value)}
-              placeholder="e.g., NexQ, Tauri, WASAPI, transcription..."
+              placeholder="e.g., zaiqoM, meeting, roadmap, transcription..."
               rows={2}
               className="w-full rounded-lg border border-border/50 bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/20 resize-none"
             />

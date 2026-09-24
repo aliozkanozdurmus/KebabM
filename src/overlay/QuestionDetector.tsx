@@ -3,18 +3,31 @@ import { HelpCircle, Sparkles, Check, Clock, X } from "lucide-react";
 import { onQuestionDetected } from "../lib/events";
 import { generateAssist } from "../lib/ipc";
 import { useTranscriptStore } from "../stores/transcriptStore";
-import type { DetectedQuestion } from "../lib/types";
+import { useStreamStore } from "../stores/streamStore";
+import { useMeetingStore } from "../stores/meetingStore";
+import type { DetectedQuestion, TranscriptSegment } from "../lib/types";
 
 function looksLikeQuestion(text: string): boolean {
   const trimmed = text.trim();
-  if (trimmed.endsWith("?")) return true;
+  if (trimmed.length < 8) return false;
+  if (trimmed.includes("?")) return true;
   const lower = trimmed.toLowerCase();
-  const qWords = [
+  const cues = [
     "what ", "how ", "why ", "when ", "where ", "who ", "which ",
     "can you", "could you", "would you", "do you", "are you",
-    "is there", "have you", "tell me", "explain",
+    "is there", "have you", "tell me", "explain", "walk me",
+    "ne ", "nasıl", "neden", "niçin", "kim ", "hangi", "nerede", "ne zaman",
+    "comment ", "pourquoi", "est-ce", "quel ", "quelle ", "pouvez-vous",
   ];
-  return qWords.some((w) => lower.startsWith(w));
+  if (cues.some((cue) => lower.includes(cue))) return true;
+  return /\b(mi|mı|mu|mü)\b/.test(lower);
+}
+
+function fromOtherParty(segment: TranscriptSegment): boolean {
+  const speaker = (segment.speaker || "").toLowerCase();
+  const id = (segment.speaker_id || "").toLowerCase();
+  if (speaker === "you" || speaker === "user" || id === "you") return false;
+  return speaker === "them" || speaker === "interviewer" || id === "them";
 }
 
 interface TrackedQuestion extends DetectedQuestion {
@@ -24,7 +37,14 @@ interface TrackedQuestion extends DetectedQuestion {
 export function QuestionDetector() {
   const [questions, setQuestions] = useState<TrackedQuestion[]>([]);
   const processedIdsRef = useRef<Set<string>>(new Set());
+  const answeredRef = useRef<Set<string>>(new Set());
+  const pendingQuestionRef = useRef<string | null>(null);
+  const answerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastAnswerAtRef = useRef(0);
+  const lastFlowCharsRef = useRef(0);
   const segments = useTranscriptStore((s) => s.segments);
+  const isRecording = useMeetingStore((s) => s.isRecording);
+  const isStreaming = useStreamStore((s) => s.isStreaming);
 
   const addQuestion = useCallback((q: DetectedQuestion) => {
     setQuestions((prev) => {
@@ -42,15 +62,63 @@ export function QuestionDetector() {
     return () => { p.then((u) => u()); };
   }, [addQuestion]);
 
-  useEffect(() => {
-    for (const seg of segments) {
-      if (seg.is_final && !processedIdsRef.current.has(seg.id) && (seg.speaker === "Them" || seg.speaker === "Interviewer") && looksLikeQuestion(seg.text)) {
-        processedIdsRef.current.add(seg.id);
-        addQuestion({ text: seg.text, confidence: 0.8, timestamp_ms: seg.timestamp_ms, source: seg.speaker });
-      }
-      if (seg.is_final) processedIdsRef.current.add(seg.id);
+  const answerQuestion = useCallback((text: string) => {
+    const key = text.trim().toLowerCase().slice(0, 180);
+    if (!key || answeredRef.current.has(key)) return;
+    if (useStreamStore.getState().isStreaming) {
+      pendingQuestionRef.current = text;
+      return;
     }
-  }, [segments, addQuestion]);
+    answeredRef.current.add(key);
+    lastAnswerAtRef.current = Date.now();
+    addQuestion({ text, confidence: 0.9, timestamp_ms: Date.now(), source: "Them" });
+    setQuestions((prev) => prev.map((q) => q.text === text ? { ...q, assisted: true } : q));
+    generateAssist("Assist", text).catch(() => {});
+  }, [addQuestion]);
+
+  useEffect(() => {
+    if (!isRecording) return;
+    for (const seg of segments) {
+      if (!seg.is_final || processedIdsRef.current.has(seg.id)) continue;
+      processedIdsRef.current.add(seg.id);
+      if (!fromOtherParty(seg) || !looksLikeQuestion(seg.text)) continue;
+      addQuestion({ text: seg.text, confidence: 0.8, timestamp_ms: seg.timestamp_ms, source: seg.speaker || "Them" });
+      pendingQuestionRef.current = seg.text;
+      if (answerTimerRef.current) clearTimeout(answerTimerRef.current);
+      answerTimerRef.current = setTimeout(() => {
+        const next = pendingQuestionRef.current;
+        pendingQuestionRef.current = null;
+        if (next) answerQuestion(next);
+      }, 900);
+    }
+  }, [segments, isRecording, addQuestion, answerQuestion]);
+
+  useEffect(() => {
+    if (isStreaming || !pendingQuestionRef.current) return;
+    const next = pendingQuestionRef.current;
+    pendingQuestionRef.current = null;
+    answerQuestion(next);
+  }, [isStreaming, answerQuestion]);
+
+  useEffect(() => {
+    if (!isRecording) return;
+    const timer = setInterval(() => {
+      if (useStreamStore.getState().isStreaming) return;
+      if (Date.now() - lastAnswerAtRef.current < 18000) return;
+      const spoken = useTranscriptStore.getState().segments
+        .filter((seg) => seg.is_final)
+        .map((seg) => seg.text)
+        .join(" ");
+      if (spoken.length - lastFlowCharsRef.current < 180) return;
+      lastFlowCharsRef.current = spoken.length;
+      lastAnswerAtRef.current = Date.now();
+      generateAssist(
+        "FollowUp",
+        "From the latest part of the meeting, give follow-up questions and example questions I can ask next."
+      ).catch(() => {});
+    }, 40000);
+    return () => clearInterval(timer);
+  }, [isRecording]);
 
   const handleAssist = useCallback((index: number) => {
     const questionText = questions[index]?.text;
@@ -100,7 +168,7 @@ export function QuestionDetector() {
             </p>
           ) : (
             <p className="text-xs text-muted-foreground/50">
-              Listening for questions from the other party
+              Listening. A question from the other side is answered on its own. Follow-ups appear as the meeting moves.
             </p>
           )}
         </div>

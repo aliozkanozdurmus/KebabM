@@ -86,7 +86,7 @@ const HELP: Record<string, { title: string; body: string }> = {
   },
   autoTrigger: {
     title: "Auto-Trigger",
-    body: "When enabled, NexQ listens for questions directed at you during the meeting and automatically generates suggested answers.\n\nTurn OFF during presentations or when you want manual-only control. You can still trigger actions manually with the overlay buttons.",
+    body: "When enabled, zaiqoM listens for questions directed at you during the meeting and automatically generates suggested answers.\n\nTurn OFF during presentations or when you want manual-only control. You can still trigger actions manually with the overlay buttons.",
   },
   temperature: {
     title: "Temperature",

@@ -56,14 +56,17 @@ pub async fn start_meeting(
         .lock()
         .map_err(|e| format!("Failed to lock database: {}", e))?;
 
+    let active_project = crate::projects::active(db.connection()).ok().flatten();
     let title = title.unwrap_or_else(|| {
-        format!(
-            "Meeting {}",
-            chrono::Local::now().format("%Y-%m-%d %H:%M")
-        )
+        let stamp = chrono::Local::now().format("%Y-%m-%d %H:%M");
+        match &active_project {
+            Some(project) => format!("{} {}", project.name, stamp),
+            None => format!("Meeting {}", stamp),
+        }
     });
+    let project_id = active_project.as_ref().map(|project| project.id.as_str());
 
-    let meeting = meetings::create_meeting(db.connection(), &title)
+    let meeting = meetings::create_meeting(db.connection(), &title, project_id, "live")
         .map_err(|e| format!("Failed to create meeting: {}", e))?;
 
     // Clear per-meeting state so the new meeting starts fresh.
@@ -185,6 +188,30 @@ pub async fn end_meeting(
 
     let _ = (end_time, duration_seconds); // suppress unused warnings
     Ok(())
+}
+
+#[command]
+pub async fn import_meeting_transcript(
+    project_id: String,
+    title: String,
+    transcript: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let title = title.trim().to_string();
+    if title.is_empty() {
+        return Err("Give the transcript a title".to_string());
+    }
+    let db = state
+        .database
+        .as_ref()
+        .ok_or_else(|| "Database not initialized".to_string())?;
+    let db = db.lock().map_err(|e| e.to_string())?;
+    if crate::projects::get(db.connection(), &project_id).is_err() {
+        return Err("Choose a project before adding a transcript".to_string());
+    }
+    let meeting = meetings::import_transcript(db.connection(), &project_id, &title, &transcript)
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&meeting).map_err(|e| e.to_string())
 }
 
 #[command]

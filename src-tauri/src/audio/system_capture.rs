@@ -42,7 +42,8 @@ pub fn start_system_capture_device(
     let handle = std::thread::Builder::new()
         .name("system-audio-capture".into())
         .spawn(move || {
-            if let Err(e) = run_cpal_loopback(tx, stop_flag, device_name) {
+            let result = run_platform(tx, stop_flag, device_name);
+            if let Err(e) = result {
                 log::error!("System audio capture failed: {}", e);
             }
         })
@@ -51,6 +52,31 @@ pub fn start_system_capture_device(
     Ok(handle)
 }
 
+fn run_platform(
+    tx: mpsc::Sender<AudioChunk>,
+    stop_flag: Arc<AtomicBool>,
+    device_name: Option<String>,
+) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        return run_cpal_loopback(tx, stop_flag, device_name);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return super::system_linux::run(tx, stop_flag, device_name);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return super::system_macos::run(tx, stop_flag, device_name);
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+    {
+        let _ = (tx, stop_flag, device_name);
+        Err("System audio capture is not available on this operating system".to_string())
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn run_cpal_loopback(
     tx: mpsc::Sender<AudioChunk>,
     stop_flag: Arc<AtomicBool>,
@@ -155,7 +181,7 @@ fn run_cpal_loopback(
     Ok(())
 }
 
-fn send_system_chunk(
+pub(crate) fn send_system_chunk(
     i16_data: &[i16],
     sample_rate: u32,
     channels: u16,

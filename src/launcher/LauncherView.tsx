@@ -3,11 +3,12 @@ import { useMeetingStore } from "../stores/meetingStore";
 import { useConfigStore } from "../stores/configStore";
 import { useContextStore } from "../stores/contextStore";
 import { useRagStore } from "../stores/ragStore";
-import { searchMeetings, deleteMeeting } from "../lib/ipc";
+import { searchMeetings, deleteMeeting, getPlatformCapabilities, setMeetingFeed, type ProjectRecord } from "../lib/ipc";
 import { showToast } from "../stores/toastStore";
 import { RecentMeetings } from "./RecentMeetings";
 import { MeetingDetails } from "./meeting-details";
 import { MeetingSetupModal } from "./MeetingSetupModal";
+import { ProjectPanel } from "./ProjectPanel";
 import { FileUpload } from "../context/FileUpload";
 import { ResourceCard } from "../context/ResourceCard";
 import { TokenBudget } from "../context/TokenBudget";
@@ -15,7 +16,7 @@ import { TestSearchDialog } from "../context/TestSearchDialog";
 import { NEXQ_VERSION, NEXQ_DEVELOPER } from "../lib/version";
 import { ServiceStatusBar } from "../components/ServiceStatusBar";
 import { showOverlayWindow } from "../lib/windows";
-import type { MeetingSummary, AudioMode, AIScenario } from "../lib/types";
+import type { MeetingSummary, AudioMode, AIScenario, PlatformCapabilities } from "../lib/types";
 import {
   Settings,
   Search,
@@ -88,11 +89,14 @@ export function LauncherView() {
   const [ragStatus, setRagStatus] = useState<"idle" | "updating" | "done">("idle");
   const [showTestKB, setShowTestKB] = useState(false);
   const [showMeetingSetup, setShowMeetingSetup] = useState(false);
+  const [platform, setPlatform] = useState<PlatformCapabilities | null>(null);
+  const [focusProjectId, setFocusProjectId] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [generalContext, setGeneralContext] = useState<string | null>(null);
   // Pending audioMode/scenario from setup modal — used when conflict resolution triggers start
   const pendingMeetingSetup = useRef<{ audioMode: AudioMode; scenario: AIScenario } | null>(null);
 
   const contextStrategy = useConfigStore((s) => s.contextStrategy);
-  const rememberedMeetingSetup = useConfigStore((s) => s.rememberedMeetingSetup);
   const indexStatus = useRagStore((s) => s.indexStatus);
   const isIndexing = useRagStore((s) => s.isIndexing);
   const indexStale = useRagStore((s) => s.indexStale);
@@ -109,6 +113,7 @@ export function LauncherView() {
     loadResources();
     refreshTokenBudget();
     refreshIndexStatus();
+    getPlatformCapabilities().then(setPlatform).catch(() => {});
     if (!autoStartTriggered.current) {
       autoStartTriggered.current = true;
       const { startOnLogin } = useConfigStore.getState();
@@ -126,12 +131,19 @@ export function LauncherView() {
   }, [activeMeeting]);
 
   // Called when user confirms setup in the modal
-  const handleSetupConfirm = useCallback(async (audioMode: AudioMode, scenario: AIScenario) => {
+  const handleSetupConfirm = useCallback(async (choice: { projectId: string } | { context: string }) => {
     setShowMeetingSetup(false);
     setIsStarting(true);
     setStartError(null);
     try {
-      await startMeetingFlow(undefined, audioMode, scenario);
+      if ("context" in choice) {
+        setGeneralContext(choice.context);
+        await setMeetingFeed(choice.context);
+      } else {
+        setGeneralContext(null);
+        await setMeetingFeed("");
+      }
+      await startMeetingFlow(undefined, "online", "team_meeting");
       showToast("Meeting started", "success");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to start meeting";
@@ -225,8 +237,16 @@ export function LauncherView() {
     if (filter === "with_summary") list = list.filter((m) => m.has_summary);
     if (filter === "online") list = list.filter((m) => m.audio_mode === "online");
     if (filter === "in_person") list = list.filter((m) => m.audio_mode === "in_person");
+    if (focusProjectId === "unassigned") list = list.filter((m) => !m.project_id);
+    else if (focusProjectId) list = list.filter((m) => m.project_id === focusProjectId);
     return list;
-  }, [searchResults, recentMeetings, filter, favorites]);
+  }, [searchResults, recentMeetings, filter, favorites, focusProjectId]);
+
+  const visibleProjects = useMemo(() => {
+    if (focusProjectId === "unassigned") return [];
+    if (!focusProjectId) return projects;
+    return projects.filter((project) => project.id === focusProjectId);
+  }, [projects, focusProjectId]);
 
   // ── Meeting Details view ──
 
@@ -241,10 +261,10 @@ export function LauncherView() {
   return (
     <div className="flex h-full flex-col bg-background">
       {/* ═══ HEADER ═══ */}
-      <header className="dash-header flex flex-wrap items-center justify-between gap-2 px-5 py-3 border-b border-border/20">
-        <div className="flex items-center gap-2.5">
-          <img src="/nexq-icon.png" alt="NexQ" className="h-7 w-7 rounded-lg" />
-          <span className="text-sm font-bold tracking-tight text-foreground">NexQ</span>
+      <header className="dash-header flex h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 text-foreground">
+        <div className="flex items-center gap-3">
+          <img src="/zaiqom-icon.png" alt="" className="h-5 w-5" />
+          <span className="text-sm font-normal tracking-normal">zaiqoM</span>
         </div>
 
         {/* Active meeting in header */}
@@ -263,20 +283,42 @@ export function LauncherView() {
           </button>
         )}
 
-        <button
-          onClick={() => setCurrentView("settings")}
-          className="rounded-lg p-2 text-muted-foreground/50 transition-all duration-150 hover:bg-secondary hover:text-foreground hover:rotate-45 active:scale-90 cursor-pointer"
-          aria-label="Settings (Ctrl+,)"
-        >
-          <Settings className="h-4 w-4" aria-hidden="true" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleStartMeeting}
+            disabled={isStarting}
+            aria-busy={isStarting}
+            className="flex h-8 items-center gap-2 bg-primary px-4 text-sm font-normal text-primary-foreground transition-colors hover:bg-[#0353e9] disabled:opacity-60 cursor-pointer"
+          >
+            {isStarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" fill="currentColor" />}
+            {isStarting ? "Starting" : "Start meeting"}
+          </button>
+          <button
+            onClick={() => setCurrentView("settings")}
+            className="p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
+            aria-label="Settings"
+          >
+            <Settings className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
       </header>
 
       {/* ═══ MAIN DASHBOARD ═══ */}
       <div className="flex flex-1 overflow-hidden">
+        <ProjectPanel
+          meetings={searchResults ?? recentMeetings}
+          selectedMeetingId={selectedMeetingId}
+          focusProjectId={focusProjectId}
+          onSelectMeeting={handleSelectMeeting}
+          onFocusProject={setFocusProjectId}
+          onProjects={setProjects}
+          onChanged={() => {
+            loadRecentMeetings();
+          }}
+        />
 
-        {/* ── LEFT: MEETINGS SIDEBAR ── */}
-        <div className="dash-sidebar flex w-[280px] min-w-[220px] shrink flex-col border-r border-border/10 bg-card/20">
+        {/* ── MEETINGS, GROUPED BY PROJECT ── */}
+        <div className="dash-main flex min-w-0 flex-1 flex-col bg-background">
           {/* Search */}
           <div className="px-3 pt-3 pb-2">
             <div className="group relative">
@@ -343,6 +385,7 @@ export function LauncherView() {
           <div className="flex-1 overflow-y-auto px-2 pb-2 scrollbar-thin scrollbar-thumb-border/20">
             <RecentMeetings
               meetings={displayedMeetings}
+              projects={visibleProjects}
               onSelect={handleSelectMeeting}
               onDelete={handleDeleteMeeting}
               onRename={handleRenameMeeting}
@@ -354,43 +397,18 @@ export function LauncherView() {
         </div>
 
         {/* ── RIGHT: CONTEXT + START ── */}
-        <div className="dash-main flex flex-1 flex-col overflow-y-auto">
-          <div className="mx-auto w-full max-w-lg space-y-4 px-6 py-5">
-
-            {/* Start Meeting — innovative compact button */}
-            <div className="flex flex-col items-center">
-              <button
-                onClick={handleStartMeeting}
-                disabled={isStarting}
-                aria-busy={isStarting}
-                className="group dash-start-btn start-btn-glow relative flex items-center gap-3.5 rounded-2xl bg-primary pl-5 pr-7 py-4 font-semibold text-white shadow-md shadow-primary/20 transition-all duration-150 hover:shadow-lg hover:shadow-primary/30 hover:-translate-y-0.5 active:translate-y-0.5 active:scale-[0.97] disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:active:scale-100 cursor-pointer"
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/20">
-                  {isStarting
-                    ? <Loader2 className="h-4.5 w-4.5 animate-spin" aria-hidden="true" />
-                    : <Play className="h-4 w-4 ml-0.5" fill="white" aria-hidden="true" />
-                  }
-                </div>
-                <div className="text-left">
-                  <div className="text-sm font-bold tracking-tight">
-                    {isStarting ? "Starting..." : "Start Meeting"}
-                  </div>
-                  <div className="text-meta font-normal text-white/50">
-                    {rememberedMeetingSetup
-                      ? `${rememberedMeetingSetup.audioMode === "online" ? "Online" : "In-Person"} · ${rememberedMeetingSetup.scenario.replace("_", " ")}`
-                      : "Ctrl+M"
-                    }
-                  </div>
-                </div>
-              </button>
-
-              {startError && (
-                <div className="mt-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
-                  {startError}
-                </div>
-              )}
-            </div>
-
+        <aside className="dash-sidebar flex w-[320px] shrink-0 flex-col overflow-y-auto border-l border-border/10 bg-card/20">
+          <div className="space-y-4 px-4 py-4">
+            {platform && !platform.stealth && (
+              <p className="rounded-lg border border-border/30 bg-background/50 px-3 py-2 text-meta text-muted-foreground">
+                Hiding this window from screen share works on Windows.
+              </p>
+            )}
+            {startError && (
+              <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
+                {startError}
+              </div>
+            )}
             {/* Section label */}
             <div className="dash-section-enter flex items-center gap-2 pt-1">
               <Database className="h-3 w-3 text-muted-foreground/60" />
@@ -400,110 +418,40 @@ export function LauncherView() {
               <div className="flex-1 border-t border-border/20" />
             </div>
 
-            {/* Dropzone */}
-            <FileUpload />
-
-            {/* RAG buttons */}
-            {resources.length > 0 && contextStrategy === "local_rag" && (
-              <div className="space-y-2">
-                {ragStatus === "idle" && (() => {
-                  const hasIndex = (indexStatus?.total_chunks ?? 0) > 0;
-                  // Only amber warning when RAG settings (chunk params, model) changed — not when files added/removed
-                  const settingsStale = indexStale;
-                  const isFirstBuild = !hasIndex;
-
-                  return (
-                    <button
-                      onClick={handleRagUpdate}
-                      className={`w-full rounded-lg border border-dashed px-3 py-2 text-xs font-medium transition-all duration-150 active:scale-[0.98] cursor-pointer ${
-                        settingsStale
-                          ? "border-warning/40 bg-warning/5 text-warning hover:bg-warning/10 hover:border-warning/60"
-                          : isFirstBuild
-                            ? "border-primary/20 bg-primary/5 text-primary/70 hover:bg-primary/10 hover:border-primary/40"
-                            : "border-success/20 bg-success/5 text-success/70 hover:bg-success/10 hover:border-success/40"
-                      }`}
-                    >
-                      {settingsStale ? (
-                        <>
-                          <AlertTriangle className="mr-1 inline h-3 w-3" />
-                          Settings Changed — Rebuild Knowledge Base
-                        </>
-                      ) : isFirstBuild ? (
-                        <>
-                          <Zap className="mr-1 inline h-3 w-3" />
-                          Build Knowledge Base
-                        </>
-                      ) : (
-                        <>
-                          <CheckCircle2 className="mr-1 inline h-3 w-3" />
-                          Update Knowledge Base
-                        </>
-                      )}
-                    </button>
-                  );
-                })()}
-                {ragStatus === "updating" && (
-                  <div className="flex items-center justify-center gap-2 rounded-lg border border-warning/20 bg-warning/5 px-3 py-2 text-xs text-warning">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Building knowledge base...
+            {(() => {
+              if (generalContext !== null) {
+                return (
+                  <div className="space-y-2 text-xs text-muted-foreground">
+                    <p className="text-sm text-foreground">General</p>
+                    <p>The meeting uses the context you pasted.</p>
+                    <p className="whitespace-pre-wrap border border-border/30 bg-background/40 p-2 text-foreground/80">
+                      {generalContext.trim() || "No notes pasted."}
+                    </p>
                   </div>
-                )}
-
-                {/* Auto-indexing indicator (triggered by file add/remove) */}
-                {isAutoIndexing && ragStatus === "idle" && (
-                  <div className="flex items-center gap-2 rounded-lg border border-border/20 bg-accent/20 px-3 py-1.5 text-meta text-muted-foreground/70">
-                    <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                    Indexing file...
-                  </div>
-                )}
-                {ragStatus === "done" && (
-                  <div className="flex items-center justify-center gap-2 rounded-lg border border-success/20 bg-success/5 px-3 py-2 text-xs text-success">
-                    <CheckCircle2 className="h-3 w-3" />
-                    Knowledge base updated
-                  </div>
-                )}
-
-                {/* Test Knowledge Base button */}
-                {(indexStatus?.total_chunks ?? 0) > 0 && ragStatus !== "updating" && (
-                  <button
-                    onClick={() => setShowTestKB(true)}
-                    className="w-full rounded-lg border border-dashed border-border/30 bg-card/30 px-3 py-2 text-xs font-medium text-muted-foreground transition-all duration-150 hover:bg-accent/30 hover:text-foreground hover:border-border/50 active:scale-[0.98] cursor-pointer"
-                  >
-                    <FlaskConical className="mr-1 inline h-3 w-3" />
-                    Test Knowledge Base
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Token budget */}
-            <TokenBudget />
-
-            {/* Sources */}
-            {resources.length > 0 && (
-              <div>
-                <div className="mb-2 text-meta font-semibold uppercase tracking-wider text-muted-foreground/60">
-                  Sources ({resources.length})
+                );
+              }
+              const focused = projects.find((project) => project.id === focusProjectId)
+                ?? projects.find((project) => project.is_active)
+                ?? projects.find((project) => project.brief);
+              if (!focused) {
+                return <p className="text-xs text-muted-foreground">Choose a project, or start a General meeting and paste the context.</p>;
+              }
+              return (
+                <div className="space-y-2 text-xs text-muted-foreground">
+                  <p className="text-sm text-foreground">{focused.name}</p>
+                  <p className="break-all">{focused.root_path}\zaiqo-meet</p>
+                  <p>{focused.brief ? "The meeting reads this knowledge base." : "Build knowledge on the project to write zaiqo-meet."}</p>
+                  {focused.brief && (
+                    <p className="whitespace-pre-wrap border border-border/30 bg-background/40 p-2 text-foreground/80">
+                      {focused.brief.slice(0, 1600)}
+                    </p>
+                  )}
                 </div>
-                <div className="space-y-2">
-                  {resources.map((r) => (
-                    <ResourceCard
-                      key={r.id}
-                      resource={r}
-                      onRemove={(id) => {
-                        removeFile(id);
-                        if (contextStrategy === "local_rag") {
-                          autoRemoveFileIndex(id);
-                        }
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
           </div>
-        </div>
+        </aside>
       </div>
 
       {/* ═══ FOOTER ═══ */}
@@ -512,7 +460,7 @@ export function LauncherView() {
         <div className="flex items-center gap-2 pr-5 text-xs text-muted-foreground/60">
           <span>&copy; {new Date().getFullYear()} {NEXQ_DEVELOPER}</span>
           <span className="text-muted-foreground/40">|</span>
-          <span className="font-medium">NexQ v{NEXQ_VERSION}</span>
+          <span className="font-medium">zaiqoM v{NEXQ_VERSION}</span>
         </div>
       </footer>
 

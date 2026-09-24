@@ -186,7 +186,8 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
         if (config.meetingAudioConfig) {
           await startCapturePerParty(
             config.meetingAudioConfig.you,
-            config.meetingAudioConfig.them
+            config.meetingAudioConfig.them,
+            config.sttLanguage || "en-US"
           );
           // In-person mode: mute "you" source — room mic captures everyone,
           // separate mic capture is redundant and creates duplicate "You" transcripts.

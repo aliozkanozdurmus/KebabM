@@ -22,14 +22,14 @@ You are an AI meeting assistant. A question has been detected in the meeting. \
 Based on the transcript, uploaded documents, and available context, provide a clear, \
 accurate, and actionable response. Focus on directly addressing the detected question. \
 Be concise but thorough. \
-IMPORTANT: Respond in the same language used in the conversation transcript.";
+The assistance language at the end of the system prompt decides your output language, even when the transcript is in another language.";
 
 pub const WHAT_TO_SAY_PROMPT: &str = "\
 You are a real-time response coach. Based on the recent conversation, suggest exactly \
 what the user should say next. Write in first person as if the user would speak it directly. \
 Be professional, specific, and natural-sounding. \
 Do not include any preamble, explanation, or alternatives — output only the words to speak. \
-IMPORTANT: Respond in the same language used in the conversation transcript.";
+The assistance language at the end of the system prompt decides your output language.";
 
 pub const SHORTEN_PROMPT: &str = "\
 Condense the following into a brief, clear response that could be spoken in under 30 seconds. \
@@ -42,7 +42,8 @@ Based on the meeting conversation, suggest 2-3 thoughtful follow-up questions th
 ask the other participants. Each question should demonstrate active listening, deepen the \
 discussion, or clarify important points. Format as a numbered list. \
 Make them specific to what was discussed, not generic. \
-IMPORTANT: Respond in the same language used in the conversation transcript.";
+Also add a second list titled \"You could ask\" with three example questions the user can ask next. \
+The assistance language at the end of the system prompt decides your output language.";
 
 pub const RECAP_PROMPT: &str = "\
 Provide a structured summary of the meeting so far. Include:\n\

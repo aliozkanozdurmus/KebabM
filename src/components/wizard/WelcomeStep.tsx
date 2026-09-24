@@ -147,7 +147,7 @@ export function WelcomeStep({ onDetectionComplete }: WelcomeStepProps) {
           <Sparkles className="h-8 w-8 text-primary" />
         </div>
         <h2 className="text-2xl font-semibold text-foreground">
-          Welcome to NexQ
+          Welcome to zaiqoM
         </h2>
         <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
           Let's get your AI meeting assistant set up. This will only take a

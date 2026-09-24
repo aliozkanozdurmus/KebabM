@@ -1,4 +1,6 @@
 pub mod anthropic;
+pub mod chatgpt;
+pub mod chatgpt_auth;
 pub mod custom;
 pub mod gemini;
 pub mod gemini_cache;
@@ -24,6 +26,27 @@ pub enum ProviderType {
     Groq,
     Gemini,
     Openrouter,
+    /// xAI Grok. OpenAI-compatible chat completions at api.x.ai.
+    Xai,
+    /// OpenAI Codex models (gpt-5.5 and the Codex line) on the OpenAI API.
+    Codex,
+    Mistral,
+    Deepseek,
+    Together,
+    Fireworks,
+    Cerebras,
+    Perplexity,
+    Cohere,
+    Sambanova,
+    Nvidia,
+    Github,
+    Moonshot,
+    Qwen,
+    Zhipu,
+    /// ChatGPT Plus, Pro, Team, or Enterprise subscription via the Codex login.
+    Chatgpt,
+    /// Azure OpenAI resource. Uses the api-key header and the resource URL.
+    Azure,
     Custom,
 }
 
@@ -37,6 +60,23 @@ impl ProviderType {
             "groq" => Ok(Self::Groq),
             "gemini" => Ok(Self::Gemini),
             "openrouter" => Ok(Self::Openrouter),
+            "xai" => Ok(Self::Xai),
+            "codex" => Ok(Self::Codex),
+            "mistral" => Ok(Self::Mistral),
+            "deepseek" => Ok(Self::Deepseek),
+            "together" => Ok(Self::Together),
+            "fireworks" => Ok(Self::Fireworks),
+            "cerebras" => Ok(Self::Cerebras),
+            "perplexity" => Ok(Self::Perplexity),
+            "cohere" => Ok(Self::Cohere),
+            "sambanova" => Ok(Self::Sambanova),
+            "nvidia" => Ok(Self::Nvidia),
+            "github" => Ok(Self::Github),
+            "moonshot" => Ok(Self::Moonshot),
+            "qwen" => Ok(Self::Qwen),
+            "zhipu" => Ok(Self::Zhipu),
+            "chatgpt" => Ok(Self::Chatgpt),
+            "azure" => Ok(Self::Azure),
             "custom" => Ok(Self::Custom),
             _ => Err(LLMError::NotConfigured(format!(
                 "Unknown provider type: {}",
@@ -54,6 +94,23 @@ impl ProviderType {
             Self::Groq => "groq",
             Self::Gemini => "gemini",
             Self::Openrouter => "openrouter",
+            Self::Xai => "xai",
+            Self::Codex => "codex",
+            Self::Mistral => "mistral",
+            Self::Deepseek => "deepseek",
+            Self::Together => "together",
+            Self::Fireworks => "fireworks",
+            Self::Cerebras => "cerebras",
+            Self::Perplexity => "perplexity",
+            Self::Cohere => "cohere",
+            Self::Sambanova => "sambanova",
+            Self::Nvidia => "nvidia",
+            Self::Github => "github",
+            Self::Moonshot => "moonshot",
+            Self::Qwen => "qwen",
+            Self::Zhipu => "zhipu",
+            Self::Chatgpt => "chatgpt",
+            Self::Azure => "azure",
             Self::Custom => "custom",
         }
     }
@@ -67,6 +124,23 @@ impl ProviderType {
             Self::Groq => "Groq",
             Self::Gemini => "Google Gemini",
             Self::Openrouter => "OpenRouter",
+            Self::Xai => "Grok (xAI)",
+            Self::Codex => "OpenAI Codex",
+            Self::Mistral => "Mistral",
+            Self::Deepseek => "DeepSeek",
+            Self::Together => "Together",
+            Self::Fireworks => "Fireworks",
+            Self::Cerebras => "Cerebras",
+            Self::Perplexity => "Perplexity",
+            Self::Cohere => "Cohere",
+            Self::Sambanova => "SambaNova",
+            Self::Nvidia => "NVIDIA",
+            Self::Github => "GitHub Models",
+            Self::Moonshot => "Moonshot (Kimi)",
+            Self::Qwen => "Qwen",
+            Self::Zhipu => "Zhipu GLM",
+            Self::Chatgpt => "ChatGPT",
+            Self::Azure => "Azure OpenAI",
             Self::Custom => "Custom",
         }
     }
@@ -80,6 +154,23 @@ impl ProviderType {
             Self::Groq => "https://api.groq.com/openai/v1",
             Self::Gemini => "https://generativelanguage.googleapis.com",
             Self::Openrouter => "https://openrouter.ai/api/v1",
+            Self::Xai => "https://api.x.ai/v1",
+            Self::Codex => "https://api.openai.com/v1",
+            Self::Mistral => "https://api.mistral.ai/v1",
+            Self::Deepseek => "https://api.deepseek.com/v1",
+            Self::Together => "https://api.together.xyz/v1",
+            Self::Fireworks => "https://api.fireworks.ai/inference/v1",
+            Self::Cerebras => "https://api.cerebras.ai/v1",
+            Self::Perplexity => "https://api.perplexity.ai",
+            Self::Cohere => "https://api.cohere.ai/compatibility/v1",
+            Self::Sambanova => "https://api.sambanova.ai/v1",
+            Self::Nvidia => "https://integrate.api.nvidia.com/v1",
+            Self::Github => "https://models.inference.ai.azure.com",
+            Self::Moonshot => "https://api.moonshot.ai/v1",
+            Self::Qwen => "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+            Self::Zhipu => "https://open.bigmodel.cn/api/paas/v4",
+            Self::Chatgpt => "https://chatgpt.com/backend-api/codex",
+            Self::Azure => "https://YOUR_RESOURCE.openai.azure.com/openai/v1",
             Self::Custom => "",
         }
     }
@@ -87,7 +178,27 @@ impl ProviderType {
     pub fn requires_api_key(&self) -> bool {
         matches!(
             self,
-            Self::Openai | Self::Anthropic | Self::Groq | Self::Gemini | Self::Openrouter
+            Self::Openai
+                | Self::Anthropic
+                | Self::Groq
+                | Self::Gemini
+                | Self::Openrouter
+                | Self::Xai
+                | Self::Codex
+                | Self::Mistral
+                | Self::Deepseek
+                | Self::Together
+                | Self::Fireworks
+                | Self::Cerebras
+                | Self::Perplexity
+                | Self::Cohere
+                | Self::Sambanova
+                | Self::Nvidia
+                | Self::Github
+                | Self::Moonshot
+                | Self::Qwen
+                | Self::Zhipu
+                | Self::Azure
         )
     }
 
@@ -124,6 +235,7 @@ pub struct LLMRouter {
     active_model: String,
     active_provider_type: Option<ProviderType>,
     cancel_token: Arc<TokioMutex<bool>>,
+    credentials: Option<Arc<std::sync::Mutex<crate::credentials::CredentialManager>>>,
 }
 
 impl LLMRouter {
@@ -133,7 +245,15 @@ impl LLMRouter {
             active_model: String::new(),
             active_provider_type: None,
             cancel_token: Arc::new(TokioMutex::new(false)),
+            credentials: None,
         }
+    }
+
+    pub fn set_credentials(
+        &mut self,
+        credentials: Arc<std::sync::Mutex<crate::credentials::CredentialManager>>,
+    ) {
+        self.credentials = Some(credentials);
     }
 
     /// Set the active provider, creating the appropriate client.
@@ -187,6 +307,60 @@ impl LLMRouter {
                     LLMError::NotConfigured("OpenRouter API key required".to_string())
                 })?;
                 Box::new(openai_compat::create_openrouter_client(api_key))
+            }
+            ProviderType::Xai
+            | ProviderType::Codex
+            | ProviderType::Mistral
+            | ProviderType::Deepseek
+            | ProviderType::Together
+            | ProviderType::Fireworks
+            | ProviderType::Cerebras
+            | ProviderType::Perplexity
+            | ProviderType::Cohere
+            | ProviderType::Sambanova
+            | ProviderType::Nvidia
+            | ProviderType::Github
+            | ProviderType::Moonshot
+            | ProviderType::Qwen
+            | ProviderType::Zhipu => {
+                let api_key = config.api_key.as_deref().ok_or_else(|| {
+                    LLMError::NotConfigured(format!(
+                        "{} API key required",
+                        provider_type.display_name()
+                    ))
+                })?;
+                Box::new(openai_compat::create_bearer_client(
+                    provider_type.as_str(),
+                    provider_type.default_base_url(),
+                    api_key,
+                ))
+            }
+            ProviderType::Azure => {
+                let api_key = config.api_key.as_deref().ok_or_else(|| {
+                    LLMError::NotConfigured("Azure OpenAI API key required".to_string())
+                })?;
+                let base = config.base_url.as_deref().ok_or_else(|| {
+                    LLMError::NotConfigured("Azure OpenAI endpoint required".to_string())
+                })?;
+                Box::new(openai_compat::create_api_key_client(
+                    "azure",
+                    &openai_compat::normalize_azure_base_url(base),
+                    api_key,
+                    "api-key",
+                ))
+            }
+            ProviderType::Chatgpt => {
+                let access = config.api_key.ok_or_else(|| {
+                    LLMError::NotConfigured(
+                        "Sign in with ChatGPT before using the subscription".to_string(),
+                    )
+                })?;
+                let session = chatgpt_auth::ChatGptSession {
+                    access_token: access,
+                    refresh_token: config.auth_value.unwrap_or_default(),
+                    account_id: config.auth_header.unwrap_or_default(),
+                };
+                Box::new(chatgpt::ChatGptClient::new(session, self.credentials.clone()))
             }
             ProviderType::Custom => {
                 let base_url = config.base_url.ok_or_else(|| {
@@ -259,6 +433,23 @@ impl LLMRouter {
             ProviderType::Groq,
             ProviderType::Gemini,
             ProviderType::Openrouter,
+            ProviderType::Xai,
+            ProviderType::Codex,
+            ProviderType::Mistral,
+            ProviderType::Deepseek,
+            ProviderType::Together,
+            ProviderType::Fireworks,
+            ProviderType::Cerebras,
+            ProviderType::Perplexity,
+            ProviderType::Cohere,
+            ProviderType::Sambanova,
+            ProviderType::Nvidia,
+            ProviderType::Github,
+            ProviderType::Moonshot,
+            ProviderType::Qwen,
+            ProviderType::Zhipu,
+            ProviderType::Chatgpt,
+            ProviderType::Azure,
             ProviderType::Custom,
         ];
 

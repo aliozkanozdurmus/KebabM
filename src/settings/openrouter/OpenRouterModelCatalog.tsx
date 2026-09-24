@@ -26,7 +26,7 @@ export function OpenRouterModelCatalog({ models }: OpenRouterModelCatalogProps) 
   // Filter/sort state (local, resets on leave)
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Debounce search input by 200ms
   useEffect(() => {

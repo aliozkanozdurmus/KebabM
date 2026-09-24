@@ -12,6 +12,9 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
     v4_bookmark_segment_id(conn)?;
     v5_recording_columns(conn)?;
     v6_translation_schema(conn)?;
+    v7_projects_schema(conn)?;
+    v8_project_modules_schema(conn)?;
+    v9_meeting_project_schema(conn)?;
 
     log::info!("Database migrations completed successfully");
     Ok(())
@@ -318,4 +321,63 @@ fn v3_meeting_mode_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
     )?;
 
     Ok(())
+}
+
+fn v7_projects_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS projects (
+            id          TEXT PRIMARY KEY NOT NULL,
+            name        TEXT NOT NULL,
+            root_path   TEXT NOT NULL,
+            brief       TEXT NOT NULL DEFAULT '',
+            file_count  INTEGER NOT NULL DEFAULT 0,
+            scanned_at  TEXT,
+            is_active   INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS project_excerpts (
+            id          TEXT PRIMARY KEY NOT NULL,
+            project_id  TEXT NOT NULL,
+            path        TEXT NOT NULL,
+            text        TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_project_excerpts_project
+            ON project_excerpts(project_id);
+        ",
+    )
+}
+
+fn v9_meeting_project_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
+    for alter in &[
+        "ALTER TABLE meetings ADD COLUMN project_id TEXT",
+        "ALTER TABLE meetings ADD COLUMN source TEXT NOT NULL DEFAULT 'live'",
+    ] {
+        if let Err(e) = conn.execute_batch(alter) {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column") {
+                log::warn!("ALTER TABLE meetings warning: {}", msg);
+            }
+        }
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_meetings_project_id ON meetings(project_id);",
+    )?;
+    Ok(())
+}
+
+fn v8_project_modules_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS project_modules (
+            id          TEXT PRIMARY KEY NOT NULL,
+            project_id  TEXT NOT NULL,
+            name        TEXT NOT NULL,
+            summary     TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_modules_project
+            ON project_modules(project_id);
+        ",
+    )
 }

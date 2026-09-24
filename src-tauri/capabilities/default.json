@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capability set for NexQ",
+  "description": "Default capability set for zaiqoM",
   "windows": ["launcher", "overlay", "devlog"],
   "permissions": [
     "core:default",

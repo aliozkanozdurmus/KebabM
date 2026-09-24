@@ -11,7 +11,10 @@ import {
   getApiKey,
   hasApiKey,
   listOpenRouterModels,
+  signInWithChatGpt,
 } from "../lib/ipc";
+import { open } from "@tauri-apps/plugin-shell";
+import { listen } from "@tauri-apps/api/event";
 import type { LLMProviderType, ModelInfo, OpenRouterModel } from "../lib/types";
 import { OpenRouterModelCatalog } from "./openrouter/OpenRouterModelCatalog";
 import {
@@ -36,16 +39,50 @@ const PROVIDER_DISPLAY: Record<
 > = {
   ollama: { label: "Ollama", description: "Local models via Ollama", requiresKey: false, isLocal: true },
   lm_studio: { label: "LM Studio", description: "Local models via LM Studio", requiresKey: false, isLocal: true },
-  openai: { label: "OpenAI", description: "GPT-4o, GPT-4, etc.", requiresKey: true, isLocal: false },
+  openai: { label: "OpenAI", description: "GPT-5.5, GPT-5.4, and the ChatGPT API", requiresKey: true, isLocal: false },
   anthropic: { label: "Anthropic", description: "Claude Sonnet, Opus, Haiku", requiresKey: true, isLocal: false },
   groq: { label: "Groq", description: "Ultra-fast inference", requiresKey: true, isLocal: false },
   gemini: { label: "Google Gemini", description: "Gemini Pro, Flash", requiresKey: true, isLocal: false },
   openrouter: { label: "OpenRouter", description: "Multi-provider gateway", requiresKey: true, isLocal: false },
-  custom: { label: "Custom", description: "Your own endpoint", requiresKey: false, isLocal: false },
+  xai: { label: "Grok", description: "xAI Grok 4.7 at api.x.ai", requiresKey: true, isLocal: false },
+  codex: { label: "Codex", description: "OpenAI Codex models, starting with gpt-5.5", requiresKey: true, isLocal: false },
+  mistral: { label: "Mistral", description: "Mistral Large and Codestral", requiresKey: true, isLocal: false },
+  deepseek: { label: "DeepSeek", description: "DeepSeek chat and reasoner", requiresKey: true, isLocal: false },
+  together: { label: "Together", description: "Open models on Together", requiresKey: true, isLocal: false },
+  fireworks: { label: "Fireworks", description: "Fast open-model inference", requiresKey: true, isLocal: false },
+  cerebras: { label: "Cerebras", description: "Wafer-scale fast inference", requiresKey: true, isLocal: false },
+  perplexity: { label: "Perplexity", description: "Sonar search models", requiresKey: true, isLocal: false },
+  cohere: { label: "Cohere", description: "Command models", requiresKey: true, isLocal: false },
+  sambanova: { label: "SambaNova", description: "SambaNova cloud models", requiresKey: true, isLocal: false },
+  nvidia: { label: "NVIDIA", description: "NVIDIA NIM catalog", requiresKey: true, isLocal: false },
+  github: { label: "GitHub Models", description: "Models on GitHub", requiresKey: true, isLocal: false },
+  moonshot: { label: "Moonshot", description: "Kimi models", requiresKey: true, isLocal: false },
+  qwen: { label: "Qwen", description: "Alibaba Qwen, international endpoint", requiresKey: true, isLocal: false },
+  zhipu: { label: "Zhipu", description: "GLM models", requiresKey: true, isLocal: false },
+  chatgpt: { label: "ChatGPT", description: "Plus, Pro, Team, or Enterprise subscription", requiresKey: false, isLocal: false },
+  azure: { label: "Azure OpenAI", description: "Your Azure resource and deployment", requiresKey: true, isLocal: false },
+  custom: { label: "Custom", description: "Your own OpenAI-compatible endpoint", requiresKey: false, isLocal: false },
+};
+
+const DEFAULT_MODELS: Partial<Record<LLMProviderType, string>> = {
+  xai: "grok-4.7",
+  codex: "gpt-5.5",
+  openai: "gpt-5.5",
+  mistral: "mistral-large-latest",
+  deepseek: "deepseek-chat",
+  perplexity: "sonar",
+  cerebras: "llama-3.3-70b",
+  moonshot: "kimi-latest",
+  qwen: "qwen-plus",
+  zhipu: "glm-4.5",
+  chatgpt: "gpt-5.5",
 };
 
 const ALL_PROVIDERS: LLMProviderType[] = [
-  "ollama", "lm_studio", "openai", "anthropic", "groq", "gemini", "openrouter", "custom",
+  "ollama", "lm_studio", "openai", "codex", "xai", "anthropic", "gemini",
+  "groq", "mistral", "deepseek", "openrouter", "together", "fireworks",
+  "cerebras", "perplexity", "cohere", "sambanova", "nvidia", "github",
+  "moonshot", "qwen", "zhipu", "chatgpt", "azure", "custom",
 ];
 
 // Filter out known embedding-only models
@@ -139,11 +176,14 @@ export function LLMSettings() {
   const [customBaseUrl, setCustomBaseUrl] = useState("");
   const [customAuthType, setCustomAuthType] = useState<"none" | "bearer" | "api_key">("none");
   const [customAuthValue, setCustomAuthValue] = useState("");
+  const [azureEndpoint, setAzureEndpoint] = useState("");
+  const [chatGptUrl, setChatGptUrl] = useState("");
+  const [chatGptBusy, setChatGptBusy] = useState(false);
 
   // Check which providers have stored API keys (for badge display)
   useEffect(() => {
     async function checkAllKeys() {
-      const cloudProviders = ["openai", "anthropic", "groq", "gemini", "openrouter"];
+      const cloudProviders = ALL_PROVIDERS.filter((id) => PROVIDER_DISPLAY[id].requiresKey);
       const status: Record<string, boolean> = {};
       for (const p of cloudProviders) {
         try { status[p] = await hasApiKey(p); } catch { status[p] = false; }
@@ -168,12 +208,18 @@ export function LLMSettings() {
     setModels([]);
     setOpenRouterModels([]);
     setModelsError("");
+    if (selectedProvider === "azure") {
+      getApiKey("azure_endpoint")
+        .then((value) => setAzureEndpoint(value || ""))
+        .catch(() => setAzureEndpoint(""));
+    }
   }, [selectedProvider]);
 
   // Build the provider config JSON for backend calls
   const buildProviderConfig = useCallback(() => {
     const config: Record<string, unknown> = { provider_type: selectedProvider };
     if (apiKey) config.api_key = apiKey;
+    if (selectedProvider === "azure" && azureEndpoint) config.base_url = azureEndpoint;
     if (selectedProvider === "custom") {
       if (customBaseUrl) config.base_url = customBaseUrl;
       if (customAuthType !== "none") {
@@ -182,7 +228,7 @@ export function LLMSettings() {
       }
     }
     return JSON.stringify(config);
-  }, [selectedProvider, apiKey, customBaseUrl, customAuthType, customAuthValue]);
+  }, [selectedProvider, apiKey, customBaseUrl, customAuthType, customAuthValue, azureEndpoint]);
 
   const handleProviderChange = (provider: LLMProviderType) => {
     setSelectedProvider(provider);
@@ -217,6 +263,14 @@ export function LLMSettings() {
         setConnectionMessage("Connected successfully");
         await setLLMProvider(configJson).catch(() => {});
         setConfigProvider(selectedProvider);
+        if (!selectedModel) {
+          const fallback = DEFAULT_MODELS[selectedProvider];
+          if (fallback) {
+            setSelectedModel(fallback);
+            setConfigModel(fallback);
+            await setActiveModel(selectedProvider, fallback).catch(() => {});
+          }
+        }
         // Mark as verified
         if (!verifiedCloudProviders.includes(selectedProvider)) {
           setVerifiedCloudProviders([...verifiedCloudProviders, selectedProvider]);
@@ -357,6 +411,77 @@ export function LLMSettings() {
       </div>
 
       {/* API Key Input (for cloud providers) */}
+      {selectedProvider === "chatgpt" && (
+        <div className="space-y-3 border border-border bg-card p-4">
+          <h3 className="text-sm font-normal text-foreground">Sign in with ChatGPT</h3>
+          <p className="text-xs text-muted-foreground">
+            Opens the official ChatGPT login. Plus, Pro, Team, and Enterprise plans are used through Codex. No API key.
+          </p>
+          <button
+            onClick={async () => {
+              setChatGptBusy(true);
+              setConnectionStatus("testing");
+              setConnectionMessage("Waiting for ChatGPT login");
+              const unlisten = await listen<{ url: string }>("chatgpt-login-url", (event) => {
+                setChatGptUrl(event.payload.url);
+                open(event.payload.url).catch(() => {});
+              });
+              try {
+                await signInWithChatGpt();
+                const configJson = JSON.stringify({ provider_type: "chatgpt" });
+                await setLLMProvider(configJson);
+                setConfigProvider("chatgpt");
+                setSelectedModel("gpt-5.5");
+                setConfigModel("gpt-5.5");
+                await setActiveModel("chatgpt", "gpt-5.5").catch(() => {});
+                setConnectionStatus("success");
+                setConnectionMessage("Signed in with ChatGPT");
+                if (!verifiedCloudProviders.includes("chatgpt")) {
+                  setVerifiedCloudProviders([...verifiedCloudProviders, "chatgpt"]);
+                }
+              } catch (err) {
+                setConnectionStatus("error");
+                setConnectionMessage(err instanceof Error ? err.message : "ChatGPT sign-in failed");
+              } finally {
+                unlisten();
+                setChatGptBusy(false);
+              }
+            }}
+            disabled={chatGptBusy}
+            className="inline-flex h-10 items-center bg-primary px-4 text-sm text-primary-foreground disabled:opacity-50 cursor-pointer"
+          >
+            {chatGptBusy ? "Waiting for ChatGPT…" : "Sign in with ChatGPT"}
+          </button>
+          {chatGptUrl && (
+            <a href={chatGptUrl} onClick={(e) => { e.preventDefault(); open(chatGptUrl).catch(() => {}); }}>
+              Open the ChatGPT login link
+            </a>
+          )}
+        </div>
+      )}
+
+      {selectedProvider === "azure" && (
+        <div className="space-y-3 border border-border bg-card p-4">
+          <h3 className="text-sm font-normal text-foreground">Azure resource</h3>
+          <label className="block text-xs text-muted-foreground">Endpoint</label>
+          <input
+            type="text"
+            value={azureEndpoint}
+            onChange={(e) => setAzureEndpoint(e.target.value)}
+            onBlur={() => {
+              if (azureEndpoint.trim()) {
+                storeApiKey("azure_endpoint", azureEndpoint.trim()).catch(() => {});
+              }
+            }}
+            placeholder="https://your-resource.openai.azure.com"
+            className="w-full bg-background px-3 py-2 text-sm text-foreground"
+          />
+          <p className="text-xs text-muted-foreground">
+            The model name below is your Azure deployment name. The key is the Azure OpenAI key.
+          </p>
+        </div>
+      )}
+
       {requiresApiKey && (
         <div className="rounded-xl border border-border/30 bg-card/50 p-5">
           <h3 className="mb-3 text-sm font-semibold text-primary/80">API Key</h3>
@@ -453,7 +578,7 @@ export function LLMSettings() {
         <div className="flex items-center gap-2">
           <button
             onClick={handleTestConnection}
-            disabled={connectionStatus === "testing" || (requiresApiKey && !apiKey) || (isCustom && !customBaseUrl)}
+            disabled={connectionStatus === "testing" || (requiresApiKey && !apiKey) || (isCustom && !customBaseUrl) || (selectedProvider === "azure" && !azureEndpoint)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border/50 bg-background px-4 py-2 text-sm font-medium text-foreground transition-all duration-150 hover:bg-accent hover:-translate-y-px active:translate-y-px active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:active:scale-100 cursor-pointer"
           >
             {connectionStatus === "testing" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wifi className="h-3.5 w-3.5" />}
@@ -461,7 +586,7 @@ export function LLMSettings() {
           </button>
           <button
             onClick={handleLoadModels}
-            disabled={modelsLoading || (requiresApiKey && !apiKey) || (isCustom && !customBaseUrl)}
+            disabled={modelsLoading || (requiresApiKey && !apiKey) || (isCustom && !customBaseUrl) || (selectedProvider === "azure" && !azureEndpoint)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border/50 bg-background px-4 py-2 text-sm font-medium text-foreground transition-all duration-150 hover:bg-accent hover:-translate-y-px active:translate-y-px active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-y-0 disabled:active:scale-100 cursor-pointer"
           >
             {modelsLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}

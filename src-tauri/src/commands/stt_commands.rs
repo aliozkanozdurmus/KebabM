@@ -269,26 +269,50 @@ pub async fn update_groq_config(app: AppHandle, config_json: String) -> Result<(
 }
 
 /// Set the recognition language for all STT providers.
-/// Accepts BCP-47 codes (e.g., "es-ES", "en-US"). Takes effect on next connection.
+/// Accepts BCP-47 codes (e.g., "tr-TR", "en-US").
+/// The value is stored immediately. A running capture must be restarted to
+/// reopen providers that bake the language into their connection.
 #[command]
 pub async fn set_stt_language(app: AppHandle, language: String) -> Result<(), String> {
-    let state = app.state::<AppState>();
+    let language = language.trim().to_string();
+    if language.is_empty() {
+        return Err("STT language cannot be empty".to_string());
+    }
 
-    // Keep shared_groq_config in sync — Groq reads it on every API call via current_config().
+    let state = app.state::<AppState>();
+    apply_stt_language(&state, &language)?;
+    crate::stt::emit_stt_debug(
+        &app,
+        "info",
+        "stt",
+        &format!("STT language applied: {}", language),
+    );
+    log::info!("STT language set to: {}", language);
+    Ok(())
+}
+
+pub(crate) fn apply_stt_language(state: &AppState, language: &str) -> Result<(), String> {
+    {
+        let mut lang = state
+            .stt_language
+            .write()
+            .map_err(|_| "STT language lock poisoned".to_string())?;
+        *lang = language.to_string();
+    }
+
     {
         let mut cfg = state
             .shared_groq_config
             .write()
             .map_err(|_| "Groq config lock poisoned".to_string())?;
-        cfg.language = language.clone();
+        cfg.language = language.to_string();
     }
 
     if let Some(ref stt_arc) = state.stt {
         let mut router = stt_arc
             .lock()
             .map_err(|_| "STT state lock poisoned".to_string())?;
-        router.set_language(&language);
-        log::info!("STT language set to: {}", language);
+        router.set_language(language);
     }
     Ok(())
 }

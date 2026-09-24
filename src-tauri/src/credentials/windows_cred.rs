@@ -1,5 +1,5 @@
 /// Windows Credential Manager via windows-rs crate.
-/// Key naming convention: `NexQ:{provider}`
+/// New secrets are stored as `zaiqoM:{provider}`. Older `zaiqoM:` and `NexQ:` names are still read.
 use std::slice;
 
 use windows::core::{PCWSTR, PWSTR};
@@ -11,6 +11,14 @@ use windows::Win32::Security::Credentials::{
 
 /// Format the credential target name.
 fn target_name(provider: &str) -> String {
+    format!("zaiqoM:{}", provider)
+}
+
+fn previous_target_name(provider: &str) -> String {
+    format!("{}:{}", "Zaiqo", provider)
+}
+
+fn legacy_target_name(provider: &str) -> String {
     format!("NexQ:{}", provider)
 }
 
@@ -52,7 +60,16 @@ pub fn credential_write(provider: &str, key: &str) -> Result<(), String> {
 /// Read a credential from the Windows Credential Manager.
 /// Returns None if the credential does not exist.
 pub fn credential_read(provider: &str) -> Result<Option<String>, String> {
-    let target = target_name(provider);
+    if let Some(value) = read_target(&target_name(provider))? {
+        return Ok(Some(value));
+    }
+    if let Some(value) = read_target(&previous_target_name(provider))? {
+        return Ok(Some(value));
+    }
+    read_target(&legacy_target_name(provider))
+}
+
+fn read_target(target: &str) -> Result<Option<String>, String> {
     let target_wide = to_wide(&target);
 
     let mut pcred: *mut CREDENTIALW = std::ptr::null_mut();
@@ -88,7 +105,7 @@ pub fn credential_read(provider: &str) -> Result<Option<String>, String> {
                 } else {
                     Err(format!(
                         "Failed to read credential for {}: {}",
-                        provider,
+                        target,
                         e.message()
                     ))
                 }

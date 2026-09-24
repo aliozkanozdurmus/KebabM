@@ -109,7 +109,7 @@ pub fn encode_wav_to_opus(wav_path: &Path, opus_path: &Path) -> Result<u64, Stri
         .map_err(|e| format!("Failed to write OpusHead: {}", e))?;
 
     // ── 5. Write OpusTags header packet (RFC 7845 §5.2) ──────────────────────
-    let opus_tags = build_opus_tags("NexQ Encoder");
+    let opus_tags = build_opus_tags("zaiqoM Encoder");
     pkt_writer
         .write_packet(
             opus_tags,

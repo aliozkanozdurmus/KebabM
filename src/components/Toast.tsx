@@ -40,7 +40,7 @@ const progressMap = {
 function ToastItem({ toast, onDismiss }: { toast: ToastData; onDismiss: () => void }) {
   const Icon = iconMap[toast.type];
   const [exiting, setExiting] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // Auto-dismiss with exit animation (component-driven)
   useEffect(() => {

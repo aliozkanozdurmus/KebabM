@@ -193,17 +193,15 @@ export function SettingsOverlay({ isModal = false }: SettingsOverlayProps) {
       <div
         ref={backdropRef}
         onClick={handleBackdropClick}
-        className={`fixed inset-0 z-50 flex items-center justify-center transition-all duration-150 ${
-          isVisible
-            ? "bg-black/60 backdrop-blur-sm"
-            : "bg-black/0 backdrop-blur-none"
+        className={`fixed inset-0 z-50 flex items-center justify-center transition-opacity duration-150 ${
+          isVisible ? "bg-black/50" : "bg-black/0"
         }`}
       >
         <div
           role="dialog"
           aria-modal="true"
           aria-label="Settings"
-          className={`w-[640px] max-h-[520px] flex flex-col rounded-xl border border-border/40 bg-card shadow-2xl shadow-black/20 transition-all duration-200 ${
+          className={`flex max-h-[520px] w-[640px] flex-col border border-border bg-background shadow-2xl transition-opacity duration-150 ${
             isVisible
               ? "opacity-100 scale-100 translate-y-0"
               : "opacity-0 scale-[0.97] translate-y-3"
@@ -211,12 +209,12 @@ export function SettingsOverlay({ isModal = false }: SettingsOverlayProps) {
           style={{ transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)" }}
         >
           {/* Header */}
-          <div className="flex items-center justify-between border-b border-border/30 px-5 py-3.5">
-            <h2 className="text-base font-semibold text-foreground">Settings</h2>
+          <div className="flex h-12 items-center justify-between border-b border-border bg-card px-4">
+            <h2 className="text-sm font-normal text-foreground">Settings</h2>
             <div className="flex items-center gap-1">
               <button
                 onClick={handleRunWizard}
-                className="rounded-lg p-1.5 text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground cursor-pointer"
+                className="p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
                 title="Run Setup Wizard"
                 aria-label="Run setup wizard"
               >
@@ -224,7 +222,7 @@ export function SettingsOverlay({ isModal = false }: SettingsOverlayProps) {
               </button>
               <button
                 onClick={handleCloseModal}
-                className="rounded-lg p-1.5 text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground cursor-pointer"
+                className="p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
                 title="Close (Esc)"
                 aria-label="Close settings"
               >
@@ -270,12 +268,12 @@ export function SettingsOverlay({ isModal = false }: SettingsOverlayProps) {
   return (
     <div className="flex h-full w-full bg-background">
       {/* Sidebar */}
-      <aside className="flex w-56 shrink-0 flex-col border-r border-border/30 bg-card/50">
+      <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-card">
         {/* Back Button */}
         <div className="flex items-center gap-3 border-b border-border/20 px-4 py-4">
           <button
             onClick={handleBack}
-            className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
+            className="flex h-12 items-center gap-2 px-2 text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground cursor-pointer"
             title="Back to Launcher"
             aria-label="Back to launcher"
           >

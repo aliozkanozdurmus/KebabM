@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   Github,
   FileText,
@@ -5,17 +6,11 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { NEXQ_VERSION, NEXQ_BUILD_DATE, NEXQ_DEVELOPER } from "../lib/version";
-import { useUpdater } from "../hooks/useUpdater";
 import { open } from "@tauri-apps/plugin-shell";
+import { getPlatformCapabilities } from "../lib/ipc";
+import type { PlatformCapabilities } from "../lib/types";
 
 const GITHUB_URL = "https://github.com/VahidAlizadeh/NexQ";
-
-function timeSince(ms: number): string {
-  const secs = Math.floor((Date.now() - ms) / 1000);
-  if (secs < 60) return "just now";
-  if (secs < 3600) return `${Math.floor(secs / 60)} min ago`;
-  return `${Math.floor(secs / 3600)}h ago`;
-}
 
 function formatBuildDate(dateStr: string): string {
   try {
@@ -31,31 +26,29 @@ function formatBuildDate(dateStr: string): string {
 }
 
 export function AboutSettings() {
-  const {
-    checkStatus,
-    lastChecked,
-    availableUpdate,
-    checkError,
-    downloadStatus,
-    performCheck,
-    startDownload,
-  } = useUpdater();
+  const [platform, setPlatform] = useState<PlatformCapabilities | null>(null);
 
-  // Derive update dot color and label
-  const isChecking = checkStatus === "checking";
-  const isAvailable = checkStatus === "available" && availableUpdate;
-  const isError = checkStatus === "error";
-  const isUpToDate =
-    checkStatus === "up-to-date" || checkStatus === "idle";
+  useEffect(() => {
+    getPlatformCapabilities().then(setPlatform).catch(() => {});
+  }, []);
+
+  const osLabel =
+    platform?.os === "windows"
+      ? "Windows"
+      : platform?.os === "macos"
+        ? "macOS"
+        : platform?.os === "linux"
+          ? "Linux"
+          : "This computer";
 
   return (
     <div className="space-y-6">
       {/* App Identity Card */}
       <div className="rounded-xl border border-border/30 bg-card/50 p-6">
         <div className="flex items-start gap-5">
-          <img src="/nexq-icon.png" alt="NexQ" className="h-14 w-14 shrink-0 rounded-2xl" />
+          <img src="/zaiqom-icon.png" alt="zaiqoM" className="h-14 w-14 shrink-0" />
           <div>
-            <h3 className="text-lg font-bold text-foreground">NexQ</h3>
+            <h3 className="text-lg font-bold text-foreground">zaiqoM</h3>
             <p className="text-xs text-muted-foreground">
               v{NEXQ_VERSION}
             </p>
@@ -67,11 +60,16 @@ export function AboutSettings() {
                 Tauri 2
               </span>
               <span className="inline-flex items-center rounded-full bg-secondary/50 px-3 py-1 text-meta font-medium text-muted-foreground">
-                React + Rust
+                React 19
               </span>
               <span className="inline-flex items-center rounded-full bg-secondary/50 px-3 py-1 text-meta font-medium text-muted-foreground">
-                Windows x64
+                {osLabel}
               </span>
+              {platform && !platform.stealth && (
+                <span className="inline-flex items-center rounded-full bg-secondary/50 px-3 py-1 text-meta font-medium text-muted-foreground">
+                  Screen-share hiding is Windows-only
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -96,71 +94,8 @@ export function AboutSettings() {
           <p className="mt-1 text-sm font-medium text-foreground">x86_64</p>
         </div>
         <div className="rounded-xl border border-border/30 bg-card/50 p-4">
-          <p className="text-meta text-muted-foreground/60">License</p>
-          <p className="mt-1 text-sm font-medium text-foreground">MIT</p>
-        </div>
-      </div>
-
-      {/* Update Check Row */}
-      <div className="rounded-xl border border-border/30 bg-card/50 p-5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {/* Status dot */}
-            <span
-              className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${
-                isChecking
-                  ? "animate-pulse bg-amber-400"
-                  : isAvailable
-                    ? "bg-blue-500"
-                    : isError
-                      ? "bg-red-500"
-                      : "bg-emerald-500"
-              }`}
-            />
-            <div>
-              <p className="text-sm font-medium text-foreground">
-                {isChecking
-                  ? "Checking for updates..."
-                  : isAvailable
-                    ? `v${availableUpdate.version} available`
-                    : isError
-                      ? "Update check failed"
-                      : "You're up to date"}
-              </p>
-              <p className="text-meta text-muted-foreground/60">
-                {isChecking
-                  ? "Connecting to GitHub"
-                  : isError && checkError
-                    ? checkError
-                    : isAvailable && availableUpdate.date
-                      ? `Released ${timeSince(new Date(availableUpdate.date).getTime())}`
-                      : lastChecked
-                        ? `Last checked ${timeSince(lastChecked)}`
-                        : "Not checked yet"}
-              </p>
-            </div>
-          </div>
-
-          {/* Action button */}
-          {isAvailable ? (
-            <button
-              onClick={startDownload}
-              disabled={downloadStatus === "downloading"}
-              className="rounded-lg bg-primary px-4 py-2 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-            >
-              {downloadStatus === "downloading"
-                ? "Downloading..."
-                : "Update Now"}
-            </button>
-          ) : (
-            <button
-              onClick={() => performCheck({ ignoreSkipped: true })}
-              disabled={isChecking}
-              className="rounded-lg border border-border/40 bg-secondary/50 px-4 py-2 text-xs font-medium text-foreground/80 transition-colors hover:bg-secondary disabled:opacity-50"
-            >
-              Check for Updates
-            </button>
-          )}
+          <p className="text-meta text-muted-foreground/60">Copyright</p>
+          <p className="mt-1 text-sm font-medium text-foreground">{NEXQ_DEVELOPER}</p>
         </div>
       </div>
 
@@ -207,7 +142,7 @@ export function AboutSettings() {
       {/* Footer */}
       <div className="rounded-xl border border-border/30 bg-card/50 p-5">
         <p className="text-xs text-muted-foreground/60 leading-relaxed">
-          NexQ is an open desktop application. All processing can run locally
+          zaiqoM is an open desktop application. All processing can run locally
           with Ollama or LM Studio, or optionally connect to cloud AI providers.
         </p>
       </div>

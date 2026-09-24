@@ -16,6 +16,8 @@ import { stopCapture, startCapturePerParty } from "../lib/ipc";
 export function useAudioConfigSync() {
   const isRecording = useMeetingStore((s) => s.isRecording);
   const meetingAudioConfig = useConfigStore((s) => s.meetingAudioConfig);
+  const sttLanguage = useConfigStore((s) => s.sttLanguage);
+  const deepgramConfig = useConfigStore((s) => s.deepgramConfig);
 
   // What Rust currently has running — only updated after successful restart
   const appliedConfigRef = useRef<string | null>(null);
@@ -29,7 +31,7 @@ export function useAudioConfigSync() {
   useEffect(() => {
     if (!isRecording || !meetingAudioConfig) return;
 
-    const configKey = JSON.stringify(meetingAudioConfig);
+    const configKey = JSON.stringify({ meetingAudioConfig, sttLanguage, deepgramConfig });
 
     // On first run (meeting just started), record the applied config
     if (appliedConfigRef.current === null) {
@@ -52,7 +54,7 @@ export function useAudioConfigSync() {
       (meetingAudioConfig.you.local_model_id ? `(${meetingAudioConfig.you.local_model_id})` : "") +
       `, them=${meetingAudioConfig.them.stt_provider}` +
       (meetingAudioConfig.them.local_model_id ? `(${meetingAudioConfig.them.local_model_id})` : "");
-    log("info", "config", `STT config changed → ${desc}`);
+    log("info", "config", `STT config changed → ${desc}, language=${sttLanguage}`);
 
     // Cancel any existing debounce — the new config supersedes it
     if (debounceRef.current) {
@@ -72,13 +74,18 @@ export function useAudioConfigSync() {
       restartingRef.current = true;
 
       // Read the latest config (may have changed during debounce wait)
-      const latestConfig = useConfigStore.getState().meetingAudioConfig;
+      const latestState = useConfigStore.getState();
+      const latestConfig = latestState.meetingAudioConfig;
       if (!latestConfig) {
         restartingRef.current = false;
         return;
       }
 
-      const latestKey = JSON.stringify(latestConfig);
+      const latestKey = JSON.stringify({
+        meetingAudioConfig: latestConfig,
+        sttLanguage: latestState.sttLanguage,
+        deepgramConfig: latestState.deepgramConfig,
+      });
 
       // If the latest config matches what's already running, skip
       if (appliedConfigRef.current === latestKey) {
@@ -102,15 +109,21 @@ export function useAudioConfigSync() {
         await new Promise((r) => setTimeout(r, 200));
 
         // Re-read config in case it changed during the stop
-        const freshConfig = useConfigStore.getState().meetingAudioConfig;
+        const freshState = useConfigStore.getState();
+        const freshConfig = freshState.meetingAudioConfig;
         if (!freshConfig) {
           log("warn", "config", "Hot-swap: no config available after stop");
           return;
         }
 
-        log("info", "config", "Hot-swap: starting new capture pipeline...");
-        await startCapturePerParty(freshConfig.you, freshConfig.them);
-        const freshKey = JSON.stringify(freshConfig);
+        const language = freshState.sttLanguage || "en-US";
+        log("info", "config", `Hot-swap: starting new capture pipeline (${language})...`);
+        await startCapturePerParty(freshConfig.you, freshConfig.them, language);
+        const freshKey = JSON.stringify({
+          meetingAudioConfig: freshConfig,
+          sttLanguage: language,
+          deepgramConfig: freshState.deepgramConfig,
+        });
         appliedConfigRef.current = freshKey;
         pendingConfigRef.current = freshKey;
         log("info", "config", "Hot-swap complete — new STT pipeline active");
@@ -124,7 +137,7 @@ export function useAudioConfigSync() {
         restartingRef.current = false;
       }
     }, 300);
-  }, [isRecording, meetingAudioConfig]);
+  }, [isRecording, meetingAudioConfig, sttLanguage, deepgramConfig]);
 
   // Reset when meeting ends
   useEffect(() => {

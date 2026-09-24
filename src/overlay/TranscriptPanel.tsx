@@ -107,7 +107,7 @@ export function TranscriptPanel() {
   const handleScroll = useCallback(() => {
     if (isAnimatingRef.current) return;
     const el = scrollRef.current;
-    if (!el) return;
+    if (!el || el.clientHeight < 40) return;
 
     const isAtBottom =
       Math.abs(el.scrollHeight - el.scrollTop - el.clientHeight) < 30;
@@ -152,7 +152,10 @@ export function TranscriptPanel() {
                 </span>
                 <span className="text-xs font-medium text-primary">Capturing audio</span>
               </div>
-              <p className="text-meta text-muted-foreground/50">Speech will appear as it&apos;s detected</p>
+              <p className="text-meta text-muted-foreground/50">Speech will appear as it is detected</p>
+              <p className="max-w-[260px] text-center text-meta text-muted-foreground/70">
+                A video on this computer is heard on the Them side. Web Speech only hears the microphone. Use Deepgram, Groq, or Azure for Them.
+              </p>
             </>
           ) : (
             <>

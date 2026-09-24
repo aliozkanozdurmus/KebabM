@@ -109,6 +109,44 @@ fn count_total_segments(segments_json: &str) -> usize {
 }
 
 #[command]
+pub fn set_ai_reply_language(language: String, state: State<'_, AppState>) -> Result<(), String> {
+    let code = language.trim().to_ascii_lowercase();
+    if code.is_empty() {
+        return Err("language is required".to_string());
+    }
+    let mut slot = state.ai_reply_language.write().map_err(|e| e.to_string())?;
+    *slot = code;
+    Ok(())
+}
+
+fn reply_language_instruction(code: &str) -> String {
+    let name = match code {
+        "tr" => "Turkish",
+        "en" => "English",
+        "de" => "German",
+        "fr" => "French",
+        "es" => "Spanish",
+        "it" => "Italian",
+        "pt" => "Portuguese",
+        "nl" => "Dutch",
+        "pl" => "Polish",
+        "ru" => "Russian",
+        "ar" => "Arabic",
+        "zh" => "Chinese",
+        "ja" => "Japanese",
+        "ko" => "Korean",
+        "sv" => "Swedish",
+        "hi" => "Hindi",
+        other => other,
+    };
+    format!(
+        "Assistance language: {name}. Write the entire answer in {name}, including headings and the three follow-up questions. \
+         The transcript, translation, and knowledge base may be in another language. \
+         Do not answer in the transcript language unless it is {name}."
+    )
+}
+
+#[command]
 pub async fn generate_assist(
     mode: String,
     custom_question: Option<String>,
@@ -244,11 +282,43 @@ pub async fn generate_assist(
 
     // Append composed instructions (tone + format + length + custom text) to system prompt.
     // These are behavioral directives that belong in the system context, not as reference materials.
-    let system_prompt = if include_instructions && !composed_instructions.is_empty() {
+    let mut system_prompt = if include_instructions && !composed_instructions.is_empty() {
         format!("{}\n\nAdditional Instructions: {}", base_system_prompt, composed_instructions)
     } else {
         base_system_prompt
     };
+
+    let project_pack = {
+        let question = custom_question.as_deref().unwrap_or("");
+        state
+            .database
+            .as_ref()
+            .and_then(|db| db.lock().ok())
+            .and_then(|db| crate::projects::pack(db.connection(), question).ok())
+            .flatten()
+    };
+    let meeting_feed = state
+        .meeting_feed
+        .read()
+        .map(|text| text.clone())
+        .unwrap_or_default();
+    if let Some(pack) = &project_pack {
+        system_prompt.push_str("\n\n");
+        system_prompt.push_str(&pack.instructions);
+    } else if !meeting_feed.trim().is_empty() {
+        system_prompt.push_str(
+            "\n\nAnswer only from the meeting context the user pasted for this general meeting. \
+             If the fact is not in that context, say so. \
+             End with exactly three follow-up questions about the same topic.\n\n## Follow-ups\n- \n- \n- ",
+        );
+    }
+    let reply_language = state
+        .ai_reply_language
+        .read()
+        .map(|value| value.clone())
+        .unwrap_or_else(|_| "en".to_string());
+    system_prompt.push_str("\n\n");
+    system_prompt.push_str(&reply_language_instruction(&reply_language));
 
     // Build generation params from per-action overrides or global defaults
     let temperature = action_cfg
@@ -291,10 +361,15 @@ pub async fn generate_assist(
 
     let context_text = {
         let mut parts: Vec<String> = Vec::new();
+        if let Some(pack) = &project_pack {
+            parts.push(pack.context.clone());
+        } else if !meeting_feed.trim().is_empty() {
+            parts.push(format!("# Meeting context\n{meeting_feed}"));
+        }
 
         // When Gemini cache is active, skip RAG entirely — no Ollama embed needed.
         // The full context is already cached on Gemini servers.
-        if include_rag && active_cache_name.is_none() {
+        if project_pack.is_none() && include_rag && active_cache_name.is_none() {
             // Note: we don't check config.enabled here — the action-level include_rag
             // toggle is the user's intent. If they enabled RAG for this action and have
             // indexed files, we should search. (config.enabled defaults to false and is

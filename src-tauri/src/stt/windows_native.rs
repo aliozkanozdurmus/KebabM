@@ -299,6 +299,16 @@ fn check_speech_recognizer_available(_language: &str) -> bool {
     false
 }
 
+/// True when Windows can recognize this language. Checked on a fresh thread so COM can start.
+pub fn language_available(language: &str) -> bool {
+    let language = language.to_string();
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let _ = tx.send(check_speech_recognizer_available(&language));
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(4)).unwrap_or(true)
+}
+
 /// Emit a status event from the recognition thread.
 /// Also emits an stt_debug event for the DevLog panel.
 fn emit_thread_status(app_handle: &Option<tauri::AppHandle>, party: &str, status: &str, message: Option<String>) {

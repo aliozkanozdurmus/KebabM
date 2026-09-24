@@ -785,6 +785,7 @@ pub async fn start_capture_per_party(
     app: AppHandle,
     you_config: String,
     them_config: String,
+    language: String,
 ) -> Result<(), String> {
     use crate::audio::PartyAudioConfig;
 
@@ -794,6 +795,18 @@ pub async fn start_capture_per_party(
         serde_json::from_str(&them_config).map_err(|e| format!("Invalid them_config: {}", e))?;
 
     let state = app.state::<AppState>();
+
+    let language = language.trim().to_string();
+    if language.is_empty() {
+        return Err("STT language cannot be empty".to_string());
+    }
+    crate::commands::stt_commands::apply_stt_language(&state, &language)?;
+    crate::stt::emit_stt_debug(
+        &app,
+        "info",
+        "stt",
+        &format!("Capture starting with STT language {}", language),
+    );
 
     // If already capturing, stop first (allows mid-meeting hot-swap)
     {
@@ -1485,6 +1498,30 @@ async fn create_stt_provider_for_party(
         STTProviderType::WindowsNative => {
             use crate::stt::windows_native::WindowsNativeSTT;
             let lang = get_stt_language(state);
+            if !crate::stt::windows_native::language_available(&lang)
+                && get_credential_key(state, "deepgram").is_some()
+            {
+                let _ = app.emit(
+                    "stt_connection_status",
+                    serde_json::json!({
+                        "provider": "deepgram",
+                        "party": party_role,
+                        "status": "fallback",
+                        "message": format!("Windows has no speech pack for {lang}, so this side is using Deepgram."),
+                    }),
+                );
+                let key = get_credential_key(state, "deepgram");
+                let dg_config = get_deepgram_config(state);
+                let mut p = match key.as_deref() {
+                    Some(k) => crate::stt::deepgram::DeepgramSTT::with_api_key(k),
+                    None => crate::stt::deepgram::DeepgramSTT::new(),
+                };
+                p.set_language(&lang);
+                p.set_config(dg_config);
+                p.set_app_handle(app.clone());
+                p.set_party(party_role);
+                return Ok(Some(Box::new(p)));
+            }
             let mut provider = if config.is_input_device {
                 // IPolicyConfig already overrides system default to the selected device,
                 // so DirectMic mode correctly captures from non-default devices too
@@ -1779,10 +1816,10 @@ fn get_local_model_path(
 /// Get the current STT language from the router.
 fn get_stt_language(state: &AppState) -> String {
     state
-        .stt
-        .as_ref()
-        .and_then(|stt| stt.lock().ok().map(|r| r.language.clone()))
-        .unwrap_or_else(|| "en-US".to_string())
+        .stt_language
+        .read()
+        .map(|lang| lang.clone())
+        .unwrap_or_else(|_| "en-US".to_string())
 }
 
 /// Read an API key directly from the credential store (Windows Credential Manager).

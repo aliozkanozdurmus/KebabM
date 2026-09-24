@@ -9,8 +9,9 @@ import {
   Check,
   Globe,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { generateAssist } from "../lib/ipc";
+import { AnswerMarkdown } from "./AnswerMarkdown";
+import { splitFollowUps } from "./followUps";
 import { getModeLabel } from "../lib/utils";
 import type { AIResponse, StreamSource } from "../lib/types";
 import { useConfigStore } from "../stores/configStore";
@@ -167,9 +168,7 @@ export function AIResponsePanel() {
               </span>
             </div>
             <div className="prose prose-sm prose-invert max-w-none leading-relaxed" style={proseStyle}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {currentContent}
-              </ReactMarkdown>
+              <AnswerMarkdown content={currentContent} />
               <span className="inline-block h-3 w-0.5 animate-pulse bg-primary/60 ml-0.5" />
             </div>
           </div>
@@ -213,10 +212,9 @@ export function AIResponsePanel() {
               </div>
             )}
             <div className="prose prose-sm prose-invert max-w-none leading-relaxed" style={proseStyle}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {currentContent}
-              </ReactMarkdown>
+              <AnswerMarkdown content={splitFollowUps(currentContent).body} />
             </div>
+            <FollowUps questions={splitFollowUps(currentContent).questions} />
             <SourcesList sources={currentSources} />
           </div>
         )}
@@ -253,10 +251,9 @@ export function AIResponsePanel() {
               </div>
             </div>
             <div className="prose prose-sm prose-invert max-w-none leading-relaxed" style={proseStyle}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {displayContent}
-              </ReactMarkdown>
+              <AnswerMarkdown content={splitFollowUps(displayContent).body} />
             </div>
+            <FollowUps questions={splitFollowUps(displayContent).questions} />
             <SourcesList sources={displayResponse.sources} />
           </div>
         )}
@@ -400,5 +397,25 @@ function ActionButton({
     >
       <Icon className="h-3.5 w-3.5" aria-hidden="true" />
     </button>
+  );
+}
+
+function FollowUps({ questions }: { questions: string[] }) {
+  if (questions.length === 0) return null;
+  return (
+    <div className="space-y-1 border-t border-border pt-2">
+      <div className="text-meta uppercase tracking-wider text-muted-foreground">Follow-ups</div>
+      {questions.map((question) => (
+        <button
+          key={question}
+          className="block w-full border border-border bg-background px-2 py-1.5 text-left text-xs text-foreground hover:bg-accent cursor-pointer"
+          onClick={() => {
+            generateAssist("AskQuestion", question).catch(() => {});
+          }}
+        >
+          {question}
+        </button>
+      ))}
+    </div>
   );
 }

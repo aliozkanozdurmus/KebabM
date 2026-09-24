@@ -30,7 +30,12 @@ import type {
   OpusMtModelStatus,
   TrayState,
   UpdateInfo,
+  PlatformCapabilities,
 } from "./types";
+
+export async function getPlatformCapabilities(): Promise<PlatformCapabilities> {
+  return invoke<PlatformCapabilities>("get_platform_capabilities");
+}
 
 // == IPC: Audio (Sub-PRD 3) ==
 
@@ -113,11 +118,13 @@ export async function getAudioSessions(): Promise<AudioSessionInfo[]> {
 
 export async function startCapturePerParty(
   youConfig: PartyAudioConfig,
-  themConfig: PartyAudioConfig
+  themConfig: PartyAudioConfig,
+  language: string
 ): Promise<void> {
   return invoke("start_capture_per_party", {
     youConfig: JSON.stringify(youConfig),
     themConfig: JSON.stringify(themConfig),
+    language,
   });
 }
 
@@ -152,6 +159,47 @@ export async function getAvailableSTTProviders(): Promise<string[]> {
 }
 
 // == IPC: LLM (Sub-PRD 5) ==
+
+export interface ProjectRecord {
+  id: string;
+  name: string;
+  root_path: string;
+  brief: string;
+  file_count: number;
+  scanned_at: string | null;
+  is_active: boolean;
+}
+
+export async function listProjects(): Promise<ProjectRecord[]> {
+  const result = await invoke<string>("list_projects");
+  return JSON.parse(result);
+}
+
+export async function createProject(name: string, rootPath: string): Promise<ProjectRecord> {
+  const result = await invoke<string>("create_project", { name, rootPath });
+  return JSON.parse(result);
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  return invoke("delete_project", { id });
+}
+
+export async function setActiveProject(id: string | null): Promise<void> {
+  return invoke("set_active_project", { id });
+}
+
+export async function setMeetingFeed(text: string): Promise<void> {
+  return invoke("set_meeting_feed", { text });
+}
+
+export async function scanProject(id: string): Promise<ProjectRecord> {
+  const result = await invoke<string>("scan_project", { id });
+  return JSON.parse(result);
+}
+
+export async function signInWithChatGpt(): Promise<void> {
+  return invoke("sign_in_with_chatgpt");
+}
 
 export async function setLLMProvider(provider: string): Promise<void> {
   return invoke("set_llm_provider", { provider });
@@ -188,6 +236,10 @@ export async function listOpenRouterModels(
 }
 
 // == IPC: Intelligence (Sub-PRD 6) ==
+
+export async function setAiReplyLanguage(language: string): Promise<void> {
+  return invoke("set_ai_reply_language", { language });
+}
 
 export async function generateAssist(mode: string, customQuestion?: string): Promise<void> {
   // Universal transcript: gather all final segments from the frontend store
@@ -292,6 +344,19 @@ export async function hasApiKey(provider: string): Promise<boolean> {
 }
 
 // == IPC: Meetings (Sub-PRD 1/8) ==
+
+export async function importMeetingTranscript(
+  projectId: string,
+  title: string,
+  transcript: string
+): Promise<Meeting> {
+  const result = await invoke<string>("import_meeting_transcript", {
+    projectId,
+    title,
+    transcript,
+  });
+  return JSON.parse(result);
+}
 
 export async function startMeeting(
   title?: string

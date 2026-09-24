@@ -39,6 +39,7 @@ const DEFAULT_GROQ_CONFIG: GroqConfig = {
 };
 
 const STORE_FILE = "config.json";
+let configListenersBound = false;
 
 const DEFAULT_HOTKEYS: HotkeyConfig = {
   toggle_assist: "Space",
@@ -84,6 +85,7 @@ interface ConfigState {
   // Providers
   sttProvider: STTProviderType;
   sttLanguage: string;
+  aiReplyLanguage: string;
   llmProvider: LLMProviderType;
   llmModel: string;
 
@@ -186,6 +188,7 @@ interface ConfigState {
   setContextStrategy: (strategy: ContextStrategy) => void;
   setSTTProvider: (provider: STTProviderType) => void;
   setSTTLanguage: (language: string) => void;
+  setAiReplyLanguage: (language: string) => void;
   setLLMProvider: (provider: LLMProviderType) => void;
   setLLMModel: (model: string) => void;
   setMicDeviceId: (id: string | null) => void;
@@ -242,6 +245,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
   theme: "dark",
   sttProvider: "windows_native",
   sttLanguage: "en-US",
+  aiReplyLanguage: "en",
   llmProvider: "ollama",
   llmModel: "",
   micDeviceId: null,
@@ -321,12 +325,20 @@ export const useConfigStore = create<ConfigState>((set) => ({
     persistValue("sttProvider", provider);
   },
   setSTTLanguage: (language) => {
-    set({ sttLanguage: language });
-    persistValue("sttLanguage", language);
-    // Apply immediately to Rust backend
+    const next = language.trim() || "en-US";
+    set({ sttLanguage: next });
+    persistValue("sttLanguage", next);
     import("../lib/ipc").then(({ setSTTLanguage: setBackendSTTLanguage }) =>
-      setBackendSTTLanguage(language)
+      setBackendSTTLanguage(next)
         .catch((e) => console.warn("[configStore] Failed to update STT language:", e))
+    );
+  },
+  setAiReplyLanguage: (language) => {
+    const next = language.trim().toLowerCase() || "en";
+    set({ aiReplyLanguage: next });
+    persistValue("aiReplyLanguage", next);
+    import("../lib/ipc").then(({ setAiReplyLanguage }) =>
+      setAiReplyLanguage(next).catch((e) => console.warn("[configStore] Failed to update AI reply language:", e))
     );
   },
   setLLMProvider: (provider) => {
@@ -646,6 +658,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
       const theme = await store.get<ThemeMode>("theme");
       const sttProvider = await store.get<STTProviderType>("sttProvider");
       const sttLanguage = await store.get<string>("sttLanguage");
+      const aiReplyLanguage = await store.get<string>("aiReplyLanguage");
       const llmProvider = await store.get<LLMProviderType>("llmProvider");
       const llmModel = await store.get<string>("llmModel");
       const micDeviceId = await store.get<string | null>("micDeviceId");
@@ -835,6 +848,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
         aiResponseAlign: (aiResponseAlign as "left" | "center" | "right") ?? "left",
         overlayOpacity: overlayOpacity ?? 0.65,
         sttLanguage: sttLanguage ?? "en-US",
+        aiReplyLanguage: aiReplyLanguage ?? "en",
         showPostMeetingTranslation: showPostMeetingTranslation ?? true,
         ...(trayNotifications != null && { trayNotifications }),
         ...(trayAutoStart != null && { trayAutoStart }),
@@ -870,8 +884,10 @@ export const useConfigStore = create<ConfigState>((set) => ({
         }
       }
 
-      // Set up cross-window sync: when another window changes the store,
-      // update this window's Zustand state automatically.
+      // Set up cross-window sync: when another window or the control server
+      // changes the store, update this window's Zustand state automatically.
+      if (!configListenersBound) {
+      configListenersBound = true;
       store.onKeyChange<MeetingAudioConfig>("meetingAudioConfig", (val) => {
         if (val != null) set({ meetingAudioConfig: val });
       });
@@ -883,6 +899,9 @@ export const useConfigStore = create<ConfigState>((set) => ({
       });
       store.onKeyChange<string>("sttLanguage", (val) => {
         if (val != null) set({ sttLanguage: val });
+      });
+      store.onKeyChange<string>("aiReplyLanguage", (val) => {
+        if (val != null) set({ aiReplyLanguage: val });
       });
       store.onKeyChange<LLMProviderType>("llmProvider", (val) => {
         if (val != null) set({ llmProvider: val });
@@ -899,12 +918,57 @@ export const useConfigStore = create<ConfigState>((set) => ({
       store.onKeyChange<number>("overlayOpacity", (val) => {
         if (val != null) set({ overlayOpacity: val });
       });
+      store.onKeyChange<ThemeMode>("theme", (val) => {
+        if (val != null) set({ theme: val });
+      });
+      store.onKeyChange<boolean>("firstRunCompleted", (val) => {
+        if (val != null) set({ firstRunCompleted: val });
+      });
+      store.onKeyChange<boolean>("autoTrigger", (val) => {
+        if (val != null) set({ autoTrigger: val });
+      });
+      store.onKeyChange<boolean>("autoSummary", (val) => {
+        if (val != null) set({ autoSummary: val });
+      });
+      store.onKeyChange<boolean>("recordingEnabled", (val) => {
+        if (val != null) set({ recordingEnabled: val });
+      });
+      store.onKeyChange<number>("pauseThresholdMs", (val) => {
+        if (val != null) set({ pauseThresholdMs: val });
+      });
+      store.onKeyChange<DeepgramConfig>("deepgramConfig", (val) => {
+        if (val != null) set({ deepgramConfig: val });
+      });
+      store.onKeyChange<GroqConfig>("groqConfig", (val) => {
+        if (val != null) set({ groqConfig: val });
+      });
+      store.onKeyChange<boolean>("diarizationEnabled", (val) => {
+        if (val != null) set({ diarizationEnabled: val });
+      });
+      store.onKeyChange<boolean>("startOnLogin", (val) => {
+        if (val != null) set({ startOnLogin: val });
+      });
+      store.onKeyChange<number>("contextWindowSeconds", (val) => {
+        if (val != null) set({ contextWindowSeconds: val });
+      });
+      store.onKeyChange("ai_action_configs", () => {
+        import("./aiActionsStore").then(({ useAIActionsStore }) => {
+          useAIActionsStore.getState().loadConfigs().catch(() => {});
+        });
+      });
+      }
 
       // Sync persisted STT language to Rust backend on startup.
       const loadedSttLanguage = sttLanguage ?? "en-US";
       import("../lib/ipc").then(({ setSTTLanguage: setBackendSTTLanguage }) =>
         setBackendSTTLanguage(loadedSttLanguage)
           .catch((e) => console.warn("[configStore] Failed to sync STT language on load:", e))
+      );
+      const loadedReplyLanguage = aiReplyLanguage ?? "en";
+      import("../lib/ipc").then(({ setAiReplyLanguage }) =>
+        setAiReplyLanguage(loadedReplyLanguage).catch((e) =>
+          console.warn("[configStore] Failed to sync AI reply language on load:", e)
+        )
       );
 
       // Sync persisted dual-pass config to Rust backend on startup.
