@@ -11,7 +11,7 @@
 - New generated ZaiqoM identity across UI and desktop icons.
 - Frontend, native and dependency upgrades; browser, unit and MCP coverage.
 
-## Release v1.0.0
+## Release v1.0.1
 
 Build the same tagged revision for macOS ARM64, Windows x64 and Linux x64. Publish installers only after all packaging jobs pass, with SHA-256 checksums. This is the first ZaiqoM release; inherited upstream version tags are unrelated.
 

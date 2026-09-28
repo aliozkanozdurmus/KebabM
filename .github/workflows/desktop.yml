@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-15
+          - os: macos-26
             bundles: app,dmg
           - os: windows-latest
             bundles: nsis
@@ -115,6 +115,6 @@ jobs:
           test "$(find . -maxdepth 1 -name '*.AppImage' | wc -l)" -eq 1
           test "$(find . -maxdepth 1 -name '*.deb' | wc -l)" -eq 1
           sha256sum *.exe *.dmg *.AppImage *.deb > SHA256SUMS.txt
-          gh release create "$RELEASE_TAG" --verify-tag --draft --title "ZaiqoM-MeetingHelper $RELEASE_TAG" --notes-file ../../docs/releases/v1.0.0.md
+          gh release create "$RELEASE_TAG" --verify-tag --draft --title "ZaiqoM-MeetingHelper $RELEASE_TAG" --notes-file "../../docs/releases/$RELEASE_TAG.md"
           gh release upload "$RELEASE_TAG" *.exe *.dmg *.AppImage *.deb SHA256SUMS.txt
           gh release edit "$RELEASE_TAG" --draft=false --latest

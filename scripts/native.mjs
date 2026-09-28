@@ -10,6 +10,9 @@ if (process.platform === "darwin" && !env.LIBCLANG_PATH) {
   const developer = execFileSync("xcode-select", ["-p"], { encoding: "utf8" }).trim();
   env.LIBCLANG_PATH = ["usr/lib", "Toolchains/XcodeDefault.xctoolchain/usr/lib"].map(p => join(developer, p)).find(p => existsSync(join(p, "libclang.dylib")));
 }
+if (process.platform === "win32" && !env.LIBCLANG_PATH && existsSync("C:\\Program Files\\LLVM\\bin")) {
+  env.LIBCLANG_PATH = "C:\\Program Files\\LLVM\\bin";
+}
 const cli = fileURLToPath(new URL("../node_modules/@tauri-apps/cli/tauri.js", import.meta.url));
 const args = process.argv.slice(2);
 if (args[0] === "build" && !args.includes("--bundles")) args.push("--bundles", process.platform === "darwin" ? "app,dmg" : process.platform === "win32" ? "nsis" : "appimage,deb");

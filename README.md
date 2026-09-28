@@ -53,3 +53,8 @@ Bu komut 40 cevaplanabilir + 10 sınırlılık senaryosunu kullanır. Arama eşi
 Eski `com.nexq.app`, `nexq.db` ve keychain kimlikleri korunur. Yeni indeksler uygulama verisinde tutulur; kaynak repoya otomatik dosya yazılmaz. SQLite v12 geçişinden önce mevcut veritabanının yedeği alınır. Başarısız tarama önceki indeksi bırakır.
 
 Mac/Windows kontrol ve paket iş akışları `.github/workflows/` altındadır. `npm run release:dry-run` sürüm hazırlığını gösterir; `npm run release` yalnızca yerel sürüm/changelog dosyalarını hazırlar, commit/tag/push yapmaz. İmzalı updater, anahtar ve HTTPS endpoint yapılandırılana kadar kapalıdır. [Dağıtım, yedek ve geri dönüş adımları](docs/acceptance.md), [bağımlılık istisnaları](docs/dependency-upgrades.md).
+
+
+## Download desktop installers
+
+Published installers and SHA-256 checksums are available on [GitHub Releases](https://github.com/aliozkanozdurmus/ZaiqoM-MeetingHelper/releases). Windows uses an NSIS `.exe`, macOS Apple Silicon uses a `.dmg`, and Linux x64 uses `.AppImage` or `.deb`. Initial packages do not have trusted publisher signing/notarization; signed automatic updates remain disabled. Build status and remaining runtime acceptance are documented in each release.
