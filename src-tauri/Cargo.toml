@@ -1,6 +1,6 @@
 [package]
 name = "nexq"
-version = "1.0.1"
+version = "1.0.2"
 description = "zaiqoM meeting assistant"
 authors = ["Ali Ozkan Ozdurmus"]
 edition = "2021"
