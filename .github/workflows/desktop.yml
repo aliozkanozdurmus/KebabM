@@ -92,9 +92,9 @@ jobs:
       - if: inputs.signed
         run: npm run release:config
       - if: inputs.signed
-        run: npm run tauri -- build --bundles ${{ matrix.bundles }} --config src-tauri/updater.generated.json
+        run: node scripts/package-desktop.mjs ${{ matrix.bundles }} src-tauri/updater.generated.json
       - if: ${{ !inputs.signed }}
-        run: npm run tauri -- build --bundles ${{ matrix.bundles }}
+        run: node scripts/package-desktop.mjs ${{ matrix.bundles }}
       - name: Collect installers
         run: node scripts/collect-installers.mjs
       - uses: actions/upload-artifact@v7.0.1

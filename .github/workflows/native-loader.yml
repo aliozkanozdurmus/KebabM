@@ -1,0 +1,25 @@
+name: Windows loader diagnosis
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Failed run with native-loader artifacts
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-loader-*
+          path: native-loader
+          merge-multiple: true
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - run: python -m pip install pefile==2024.8.26
+      - run: python scripts/diagnose-windows-loader.py native-loader

@@ -67,6 +67,7 @@ playwright-report/
 test-results/
 artifacts/
 src-tauri/updater.generated.json
+src-tauri/runtime.generated.json
 
 # Private project evaluation data stays local
 tests/fixtures/crosswalk-golden.json

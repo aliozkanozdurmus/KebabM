@@ -5,6 +5,10 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 const env = { ...process.env };
+// Actions exposes absent secrets as empty strings; Tauri treats their presence as signing intent.
+for (const name of ["APPLE_CERTIFICATE", "APPLE_CERTIFICATE_PASSWORD", "APPLE_SIGNING_IDENTITY", "APPLE_ID", "APPLE_PASSWORD", "APPLE_TEAM_ID", "TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"]) {
+  if (env[name] === "") delete env[name];
+}
 env.PATH = [join(homedir(), ".cargo", "bin"), ...(process.platform === "darwin" ? ["/opt/homebrew/bin", "/usr/local/bin"] : []), env.PATH].join(delimiter);
 if (process.platform === "darwin" && !env.LIBCLANG_PATH) {
   const developer = execFileSync("xcode-select", ["-p"], { encoding: "utf8" }).trim();
