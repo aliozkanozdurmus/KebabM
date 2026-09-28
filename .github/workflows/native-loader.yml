@@ -23,3 +23,12 @@ jobs:
           github-token: ${{ github.token }}
       - run: python -m pip install pefile==2024.8.26
       - run: python scripts/diagnose-windows-loader.py native-loader
+      - name: Trace Windows loader
+        if: failure()
+        timeout-minutes: 3
+        shell: pwsh
+        run: |
+          $debuggers = "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64"
+          $exe = Get-ChildItem native-loader -Recurse -Filter nexq_lib-*.exe | Select-Object -First 1
+          & "$debuggers\gflags.exe" /i $exe.Name +sls
+          & "$debuggers\cdb.exe" -g -G -c "g;q" $exe.FullName --list
