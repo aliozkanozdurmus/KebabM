@@ -16,12 +16,20 @@ fn main() {
     #[cfg(target_os = "windows")]
     {
         // rfd imports TaskDialogIndirect, which requires Common Controls v6.
-        // Tauri's app resource does not cover Rust's separate test executables.
+        // Embed through the linker so Rust's separate test executables get it too.
         println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
         println!("cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'");
         // Remove static CRT, add dynamic CRT to resolve __imp_* symbols
         println!("cargo:rustc-link-arg=/NODEFAULTLIB:libucrt.lib");
         println!("cargo:rustc-link-arg=/DEFAULTLIB:ucrt.lib");
     }
-    tauri_build::build()
+    #[cfg(target_os = "windows")]
+    tauri_build::try_build(tauri_build::Attributes::new().windows_attributes(
+        // The linker embeds the dependency above; a second manifest in the
+        // application's .res would produce a duplicate resource (CVT1100).
+        tauri_build::WindowsAttributes::new_without_app_manifest(),
+    ))
+    .expect("failed to run tauri-build");
+    #[cfg(not(target_os = "windows"))]
+    tauri_build::build();
 }
