@@ -3,6 +3,7 @@ import ctypes
 from ctypes import wintypes
 from pathlib import Path
 import sys
+import subprocess
 import pefile
 
 kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -42,3 +43,7 @@ for executable in Path(sys.argv[1]).rglob("nexq_lib-*.exe"):
             inspect(buffer.value)
         pe.close()
     inspect(executable)
+    result = subprocess.run([str(executable.resolve()), "--test-threads=1"], cwd="src-tauri", timeout=120)
+    print(f"Native test exit code: {result.returncode:#x}", flush=True)
+    if result.returncode != 0:
+        sys.exit(1)
