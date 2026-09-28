@@ -15,6 +15,10 @@ fn main() {
     // but Rust uses /MT (static CRT). We need to swap static CRT for dynamic CRT.
     #[cfg(target_os = "windows")]
     {
+        // rfd imports TaskDialogIndirect, which requires Common Controls v6.
+        // Tauri's app resource does not cover Rust's separate test executables.
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg=/MANIFESTDEPENDENCY:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'");
         // Remove static CRT, add dynamic CRT to resolve __imp_* symbols
         println!("cargo:rustc-link-arg=/NODEFAULTLIB:libucrt.lib");
         println!("cargo:rustc-link-arg=/DEFAULTLIB:ucrt.lib");
