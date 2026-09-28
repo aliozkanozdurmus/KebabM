@@ -1,3 +1,4 @@
+import { BrandMark } from "./components/BrandMark";
 import { useEffect, useCallback, useState } from "react";
 import { useMeetingStore } from "./stores/meetingStore";
 import { useConfigStore } from "./stores/configStore";
@@ -191,16 +192,16 @@ function App() {
   useEffect(() => {
     if (windowLabel !== "overlay") return;
     let unlisten: (() => void) | undefined;
-    listen<{ meeting: Meeting; audioMode: AudioMode; aiScenario: AIScenario }>(
+    listen<{ meeting: Meeting; audioMode: AudioMode; aiScenario: AIScenario; captureStarted: boolean }>(
       "nexq:meeting_started",
       (e) => {
-        const { meeting, audioMode, aiScenario } = e.payload;
+        const { meeting, audioMode, aiScenario, captureStarted } = e.payload;
         useMeetingStore.setState({
           activeMeeting: meeting,
           currentView: "overlay",
           audioMode,
           aiScenario,
-          isRecording: true,
+          isRecording: captureStarted,
           meetingStartTime: Date.now(),
           elapsedMs: 0,
           lastPersistedIndex: 0,
@@ -315,9 +316,9 @@ function App() {
         {windowLabel !== "overlay" && (
           <div className="flex flex-col items-center gap-3">
             <div className="h-8 w-8 rounded-xl bg-primary/10 flex items-center justify-center">
-              <div className="h-3 w-3 rounded-full bg-primary/40 animate-pulse" />
+              <BrandMark className="h-10 w-10" />
             </div>
-            <div className="text-sm text-muted-foreground">Starting zaiqoM...</div>
+            <div className="text-sm text-muted-foreground">Starting ZaiqoM-MeetingHelper...</div>
           </div>
         )}
       </div>
@@ -333,7 +334,7 @@ function App() {
   if (isOverlayWindow) {
     return (
       <div className="h-screen w-screen overflow-hidden bg-transparent text-foreground">
-        <ErrorBoundary fallbackMessage="zaiqoM encountered an error">
+        <ErrorBoundary fallbackMessage="ZaiqoM-MeetingHelper encountered an error">
           {currentView === "overlay" && (
             <ErrorBoundary fallbackMessage="Failed to load overlay">
               <div className="flex h-full">
@@ -356,7 +357,7 @@ function App() {
 
   return (
     <div className={`h-screen w-screen overflow-hidden text-foreground ${resolvedView === "overlay" ? "bg-transparent" : "bg-background"}`}>
-      <ErrorBoundary fallbackMessage="zaiqoM encountered an error">
+      <ErrorBoundary fallbackMessage="ZaiqoM-MeetingHelper encountered an error">
         {resolvedView === "launcher" && (
           <ErrorBoundary fallbackMessage="Failed to load launcher">
             <LauncherView />

@@ -4,6 +4,8 @@
 import { useEffect, useRef, useCallback } from "react";
 import { useUpdaterStore } from "../stores/updaterStore";
 import {
+  checkForUpdate,
+  updaterEnabled,
   downloadAndInstallUpdate,
   restartForUpdate,
 } from "../lib/ipc";
@@ -25,7 +27,20 @@ export function useUpdater() {
   // -- performCheck ----------------------------------------------------------
 
   const performCheck = useCallback(async () => {
-    return;
+    const state = useUpdaterStore.getState();
+    if (state.checkStatus === "checking" || state.downloadStatus === "downloading") return;
+    state.setCheckStatus("checking");
+    try {
+      if (!(await updaterEnabled())) {
+        if (mountedRef.current) state.setCheckStatus("disabled");
+        return;
+      }
+      const update = await checkForUpdate();
+      if (!mountedRef.current) return;
+      state.setAvailableUpdate(update?.version === useUpdaterStore.getState().skippedVersion ? null : update);
+    } catch {
+      if (mountedRef.current) state.setCheckError("Update check failed. Check the connection and try again.");
+    }
   }, []);
 
   // -- startDownload ---------------------------------------------------------
@@ -97,9 +112,9 @@ export function useUpdater() {
           useUpdaterStore.getState().setSkippedVersion(skipped);
         }
       })
-      .catch((err) => {
-        console.warn("[useUpdater] Failed to load skipped version:", err);
-      });
+      .catch(() => {})
+      .finally(() => { if (mountedRef.current) void performCheck(); });
+    const interval = window.setInterval(() => { void performCheck(); }, 6 * 60 * 60 * 1000);
 
     // Set up event listeners
     onUpdateDownloadProgress((event) => {
@@ -109,18 +124,19 @@ export function useUpdater() {
         .getState()
         .setDownloadProgress(downloadedRef.current, event.content_length);
     }).then((fn) => {
-      unlistenProgress = fn;
+      if (!mountedRef.current) fn(); else unlistenProgress = fn;
     });
 
     onUpdateReady(() => {
       if (!mountedRef.current) return;
       useUpdaterStore.getState().setDownloadStatus("ready");
     }).then((fn) => {
-      unlistenReady = fn;
+      if (!mountedRef.current) fn(); else unlistenReady = fn;
     });
 
     return () => {
       mountedRef.current = false;
+      window.clearInterval(interval);
       unlistenProgress?.();
       unlistenReady?.();
     };

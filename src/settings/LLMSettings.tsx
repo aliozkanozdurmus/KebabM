@@ -257,10 +257,10 @@ export function LLMSettings() {
     try {
       if (apiKey) await storeApiKey(selectedProvider, apiKey).catch(() => {});
       const configJson = buildProviderConfig();
-      const success = await testLLMConnection(configJson);
+      const success = await testLLMConnection(configJson, selectedModel || DEFAULT_MODELS[selectedProvider]);
       if (success) {
         setConnectionStatus("success");
-        setConnectionMessage("Connected successfully");
+        setConnectionMessage(`Model responded: ${selectedModel || DEFAULT_MODELS[selectedProvider]}`);
         await setLLMProvider(configJson).catch(() => {});
         setConfigProvider(selectedProvider);
         if (!selectedModel) {

@@ -25,9 +25,9 @@ pub fn build_tooltip(
     match state {
         TrayState::Idle => {
             if let Some(text) = custom_text {
-                format!("zaiqoM — Idle · {}", text)
+                format!("ZaiqoM-MeetingHelper — Idle · {}", text)
             } else {
-                "zaiqoM — Idle".to_string()
+                "ZaiqoM-MeetingHelper — Idle".to_string()
             }
         }
         TrayState::Recording => {
@@ -35,29 +35,29 @@ pub fn build_tooltip(
                 .map(|s| format_elapsed(s))
                 .unwrap_or_else(|| "00:00".to_string());
             if is_muted {
-                format!("zaiqoM — Recording (Mic Muted) · {} elapsed", elapsed)
+                format!("ZaiqoM-MeetingHelper — Recording (Mic Muted) · {} elapsed", elapsed)
             } else {
-                format!("zaiqoM — Recording · {} elapsed", elapsed)
+                format!("ZaiqoM-MeetingHelper — Recording · {} elapsed", elapsed)
             }
         }
         TrayState::Muted => {
             let elapsed = meeting_start
                 .map(|s| format_elapsed(s))
                 .unwrap_or_else(|| "00:00".to_string());
-            format!("zaiqoM — Recording (Mic Muted) · {} elapsed", elapsed)
+            format!("ZaiqoM-MeetingHelper — Recording (Mic Muted) · {} elapsed", elapsed)
         }
         TrayState::Stealth => {
             let elapsed = meeting_start
                 .map(|s| format_elapsed(s))
                 .unwrap_or_else(|| "00:00".to_string());
-            format!("zaiqoM — Stealth · {} elapsed", elapsed)
+            format!("ZaiqoM-MeetingHelper — Stealth · {} elapsed", elapsed)
         }
-        TrayState::AiProcessing => "zaiqoM — AI Processing...".to_string(),
+        TrayState::AiProcessing => "ZaiqoM-MeetingHelper — AI Processing...".to_string(),
         TrayState::Indexing => {
             if let Some(text) = custom_text {
-                format!("zaiqoM — {}", text)
+                format!("ZaiqoM-MeetingHelper — {}", text)
             } else {
-                "zaiqoM — Indexing files...".to_string()
+                "ZaiqoM-MeetingHelper — Indexing files...".to_string()
             }
         }
     }

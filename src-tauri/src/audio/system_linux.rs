@@ -22,6 +22,7 @@ pub fn run(
     tx: mpsc::Sender<AudioChunk>,
     stop_flag: Arc<AtomicBool>,
     device_name: Option<String>,
+    ready: &std::sync::mpsc::SyncSender<Result<(), String>>,
 ) -> Result<(), String> {
     let monitor = resolve_monitor(device_name.as_deref())?;
     log::info!("Linux system capture monitor: {}", monitor);
@@ -47,6 +48,7 @@ pub fn run(
     )
     .map_err(|e| format!("Pulse monitor open failed for '{monitor}': {e}"))?;
 
+    let _ = ready.try_send(Ok(()));
     let frame_samples = (RATE / 10) as usize * CHANNELS as usize;
     let mut bytes = vec![0u8; frame_samples * 2];
 

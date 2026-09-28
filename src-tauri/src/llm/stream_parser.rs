@@ -147,27 +147,26 @@ impl NDJSONParser {
 /// A line buffer for incremental SSE/NDJSON parsing from byte streams.
 /// Accumulates bytes until complete lines are available.
 pub struct LineBuffer {
-    buffer: String,
+    buffer: Vec<u8>,
 }
 
 impl LineBuffer {
     pub fn new() -> Self {
         Self {
-            buffer: String::new(),
+            buffer: Vec::new(),
         }
     }
 
     /// Push new bytes into the buffer and extract complete lines.
-    pub fn push(&mut self, data: &str) -> Vec<String> {
-        self.buffer.push_str(data);
+    pub fn push(&mut self, data: &str) -> Vec<String> { self.push_bytes(data.as_bytes()) }
+
+    pub fn push_bytes(&mut self, data: &[u8]) -> Vec<String> {
+        self.buffer.extend_from_slice(data);
         let mut lines = Vec::new();
-
-        while let Some(pos) = self.buffer.find('\n') {
-            let line = self.buffer[..pos].to_string();
-            self.buffer = self.buffer[pos + 1..].to_string();
-            lines.push(line);
+        while let Some(pos) = self.buffer.iter().position(|b| *b == b'\n') {
+            let raw: Vec<_> = self.buffer.drain(..=pos).collect();
+            lines.push(String::from_utf8_lossy(&raw[..pos]).into_owned());
         }
-
         lines
     }
 
@@ -176,7 +175,24 @@ impl LineBuffer {
         if self.buffer.is_empty() {
             None
         } else {
-            Some(std::mem::take(&mut self.buffer))
+            Some(String::from_utf8_lossy(&std::mem::take(&mut self.buffer)).into_owned())
+        }
+    }
+}
+
+#[cfg(test)]
+mod fragmentation_tests {
+    use super::*;
+    #[test]
+    fn every_utf8_split_preserves_turkish_sse() {
+        let text = "data: {\"choices\":[{\"delta\":{\"content\":\"Türkçe: ışık, öğün\"}}]}\r\n\n";
+        for split in 0..text.len() {
+            let mut b = LineBuffer::new();
+            let mut lines = b.push_bytes(&text.as_bytes()[..split]);
+            lines.extend(b.push_bytes(&text.as_bytes()[split..]));
+            let token = lines.iter().flat_map(|l| SSEParser::parse_chunk(l)).flatten()
+                .filter_map(|v| SSEParser::extract_openai_token(&v)).collect::<String>();
+            assert_eq!(token, "Türkçe: ışık, öğün");
         }
     }
 }

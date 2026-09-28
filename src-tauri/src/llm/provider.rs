@@ -34,6 +34,10 @@ pub struct ModelInfo {
     pub name: String,
     pub provider: String,
     pub context_window: Option<u64>,
+    #[serde(default)]
+    pub max_output_tokens: Option<u64>,
+    #[serde(default)]
+    pub capabilities: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,6 +93,9 @@ impl Serialize for LLMError {
 /// Event payloads emitted during streaming
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamStartPayload {
+    pub evidence: Vec<crate::projects::knowledge::EvidenceRef>,
+    pub search_degraded: bool,
+    pub question: Option<String>,
     pub mode: String,
     pub model: String,
     pub provider: String,
@@ -162,6 +169,6 @@ pub trait LLMProvider: Send + Sync {
         messages: Vec<LLMMessage>,
         model: &str,
         params: GenerationParams,
-        app_handle: tauri::AppHandle,
+        app_handle: super::request::ResponseSink,
     ) -> Result<CompletionStats, LLMError>;
 }

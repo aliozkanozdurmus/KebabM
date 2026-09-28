@@ -4,7 +4,6 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Instant;
-use tauri::Emitter;
 
 use super::provider::{
     CompletionStats, GenerationParams, LLMError, LLMMessage, LLMProvider, ModelInfo,
@@ -163,6 +162,7 @@ impl LLMProvider for CustomClient {
                             .filter_map(|m| {
                                 let id = m.get("id")?.as_str()?.to_string();
                                 Some(ModelInfo {
+                            max_output_tokens: None, capabilities: None,
                                     id: id.clone(),
                                     name: m
                                         .get("name")
@@ -194,6 +194,7 @@ impl LLMProvider for CustomClient {
                                     .filter_map(|m| {
                                         let name = m.get("name")?.as_str()?.to_string();
                                         Some(ModelInfo {
+                            max_output_tokens: None, capabilities: None,
                                             id: name.clone(),
                                             name: name.clone(),
                                             provider: "custom".to_string(),
@@ -246,7 +247,7 @@ impl LLMProvider for CustomClient {
         messages: Vec<LLMMessage>,
         model: &str,
         params: GenerationParams,
-        app_handle: tauri::AppHandle,
+        app_handle: super::request::ResponseSink,
     ) -> Result<CompletionStats, LLMError> {
         let start = Instant::now();
 
@@ -328,8 +329,7 @@ impl LLMProvider for CustomClient {
                 LLMError::HttpError(e)
             })?;
 
-            let chunk_str = String::from_utf8_lossy(&chunk);
-            let lines = line_buffer.push(&chunk_str);
+            let lines = line_buffer.push_bytes(&chunk);
 
             for line in lines {
                 let extractions = Self::try_extract_token(&line);

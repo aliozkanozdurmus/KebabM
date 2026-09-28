@@ -103,18 +103,5 @@ run("npx", ["conventional-changelog", "-p", "angular", "-i", "CHANGELOG.md", "-s
 console.log("\nSyncing version to all files...");
 run("node", ["scripts/sync-version.js"]);
 
-// 6. Git add + commit
-console.log("\nCommitting release...");
-run("git", ["add", "-A"]);
-run("git", ["commit", "-m", `"chore: release v${newVersion}"`]);
-
-// 7. Tag
-console.log("\nTagging...");
-run("git", ["tag", `v${newVersion}`]);
-
-// 8. Push
-console.log("\nPushing...");
-run("git", ["push"]);
-run("git", ["push", "--tags"]);
-
-console.log(`\n${dryRun ? "[dry-run] " : ""}Release v${newVersion} complete!`);
+console.log(`\n${dryRun ? "[dry-run] " : ""}Release v${newVersion} metadata prepared locally.`);
+console.log("Review the version and changelog, refresh lockfiles, run checks, and use Desktop packages for installers. Nothing was staged, committed, tagged or pushed.");

@@ -8,6 +8,7 @@ import {
   Volume2,
   Globe,
 } from "lucide-react";
+import { ReadinessChecks } from "../../launcher/ReadinessChecks";
 import { useConfigStore } from "../../stores/configStore";
 
 interface ReadyStepProps {
@@ -48,14 +49,15 @@ export function ReadyStep({
           <CheckCircle className="h-8 w-8 text-success" />
         </div>
         <h2 className="text-2xl font-semibold text-foreground">
-          You're All Set!
+          Check your setup
         </h2>
         <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
-          zaiqoM is ready to be your AI meeting assistant.
+          Verify audio and the selected model before your first meeting.
         </p>
       </div>
 
       <div className="w-full max-w-lg space-y-6">
+        <ReadinessChecks />
         {/* Configured Parties Summary */}
         {meetingAudioConfig && (
           <div className="rounded-xl border border-border/40 bg-secondary/20 p-4 space-y-2.5">
@@ -146,7 +148,7 @@ export function ReadyStep({
             className="inline-flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-primary"
           >
             <FileText className="h-3.5 w-3.5" />
-            Upload your resume for personalized responses
+            Add project documents for sourced answers
           </button>
         </div>
       </div>

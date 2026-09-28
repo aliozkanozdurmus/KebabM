@@ -433,7 +433,7 @@ export function LLMSetupStep({
             <span className="font-medium text-foreground">Tip: </span>
             {hasLocalLLM
               ? "For privacy and speed, we recommend using Ollama with llama3.2. Your conversations never leave your machine."
-              : "For the best experience, we recommend Anthropic Claude. For local privacy, install Ollama and run it before starting zaiqoM."}
+              : "For the best experience, we recommend Anthropic Claude. For local privacy, install Ollama and run it before starting ZaiqoM-MeetingHelper."}
           </p>
         </div>
       </div>

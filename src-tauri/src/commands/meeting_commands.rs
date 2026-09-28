@@ -77,6 +77,8 @@ pub async fn start_meeting(
     if let Some(intel_arc) = state.intelligence.as_ref() {
         if let Ok(mut engine) = intel_arc.lock() {
             engine.clear_session();
+            engine.session.session_id=Some(meeting.id.clone());
+            engine.session.project_id=meeting.project_id.clone();
         }
     }
     if let Some(rag_arc) = state.rag.as_ref() {
@@ -96,6 +98,8 @@ pub async fn end_meeting(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
+    if let Some(intel)=&state.intelligence {if let Ok(mut e)=intel.lock(){if e.session.session_id.as_deref()==Some(&meeting_id){e.cancel();e.session.session_id=None;}}}
+    crate::intelligence::session::publish(&app);
     let db_arc = state
         .database
         .as_ref()

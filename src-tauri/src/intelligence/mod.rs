@@ -2,13 +2,15 @@ pub mod action_config;
 pub mod context_builder;
 pub mod prompt_templates;
 pub mod question_detector;
+pub mod session;
 pub mod transcript_buffer;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use crate::llm::request::{RequestIdentity, ResponseSink};
 use serde::{Deserialize, Serialize};
-use tauri::Emitter;
+use tokio_util::sync::CancellationToken;
 
 use action_config::AllActionConfigs;
 use context_builder::ContextBuilder;
@@ -26,11 +28,13 @@ pub struct QuestionDetectedPayload {
 /// Orchestrates: read transcript -> detect question -> load context -> build prompt -> LLM stream
 pub struct IntelligenceEngine {
     pub transcript_buffer: TranscriptBuffer,
+    pub session: session::Session,
     question_detector: QuestionDetector,
     auto_trigger: AtomicBool,
-    is_generating: AtomicBool,
-    cancel_requested: Arc<AtomicBool>,
+    is_generating: Arc<AtomicBool>,
+    cancel_requested: CancellationToken,
     last_detected_question: Option<DetectedQuestion>,
+    seen_segments: std::collections::VecDeque<(u64, String, String)>,
     action_configs: AllActionConfigs,
 }
 
@@ -38,11 +42,13 @@ impl IntelligenceEngine {
     pub fn new() -> Self {
         Self {
             transcript_buffer: TranscriptBuffer::new(),
+            session: session::Session::default(),
             question_detector: QuestionDetector::new(),
             auto_trigger: AtomicBool::new(true),
-            is_generating: AtomicBool::new(false),
-            cancel_requested: Arc::new(AtomicBool::new(false)),
+            is_generating: Arc::new(AtomicBool::new(false)),
+            cancel_requested: CancellationToken::new(),
             last_detected_question: None,
+            seen_segments: std::collections::VecDeque::new(),
             action_configs: AllActionConfigs::default(),
         }
     }
@@ -56,17 +62,56 @@ impl IntelligenceEngine {
         timestamp_ms: u64,
         is_final: bool,
     ) -> Vec<DetectedQuestion> {
-        self.transcript_buffer
-            .push_segment(text.clone(), speaker.clone(), timestamp_ms, is_final);
+        self.push_transcript_persisted(text, speaker, timestamp_ms, is_final, || Ok(()))
+            .unwrap_or_default()
+    }
+
+    pub fn push_transcript_persisted<F: FnOnce() -> Result<(), String>>(
+        &mut self,
+        text: String,
+        speaker: String,
+        timestamp_ms: u64,
+        is_final: bool,
+        persist: F,
+    ) -> Result<Vec<DetectedQuestion>, String> {
+        let party = match speaker.to_lowercase().as_str() {
+            "user" | "you" | "me" => "me",
+            "room" => "room",
+            _ => "them",
+        };
+        let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        if is_final {
+            if self.seen_segments.iter().any(|(ts, src, body)| {
+                src == party && body == &normalized && timestamp_ms.abs_diff(*ts) < 15_000
+            }) {
+                return Ok(Vec::new());
+            }
+            persist()?;
+            self.session.sequence += 1;
+            if party != "me" {
+                self.session.question_sequence += 1;
+            }
+            self.seen_segments
+                .push_back((timestamp_ms, party.into(), normalized.clone()));
+            while self.seen_segments.len() > 500 {
+                self.seen_segments.pop_front();
+            }
+        }
+        self.transcript_buffer.push_segment(
+            normalized.clone(),
+            party.into(),
+            timestamp_ms,
+            is_final,
+        );
 
         // Only detect questions on final segments
-        if !is_final {
-            return Vec::new();
+        if !is_final || party == "me" {
+            return Ok(Vec::new());
         }
 
         let questions = self
             .question_detector
-            .detect_questions(&text, timestamp_ms, &speaker);
+            .detect_questions(&normalized, timestamp_ms, party);
 
         // Store the most recent high-confidence question
         if let Some(q) = questions.iter().max_by(|a, b| {
@@ -77,7 +122,7 @@ impl IntelligenceEngine {
             self.last_detected_question = Some(q.clone());
         }
 
-        questions
+        Ok(questions)
     }
 
     /// Main entry point: generate AI assistance in the given mode.
@@ -97,7 +142,7 @@ impl IntelligenceEngine {
         include_question: bool,
         include_rag: bool,
         include_instructions: bool,
-        llm_provider: Arc<tokio::sync::Mutex<Box<dyn crate::llm::provider::LLMProvider>>>,
+        llm_provider: Arc<dyn crate::llm::provider::LLMProvider>,
         model: String,
         provider_name: String,
         params: GenerationParams,
@@ -111,10 +156,12 @@ impl IntelligenceEngine {
         transcript_segments_count: usize,
         transcript_segments_total: usize,
         app_handle: tauri::AppHandle,
-        cancel_flag: Arc<AtomicBool>,
-    ) -> Result<(), String> {
-        // Reset cancel flag
-        cancel_flag.store(false, Ordering::SeqCst);
+        cancel_flag: CancellationToken,
+        identity: RequestIdentity,
+        evidence: Vec<crate::projects::knowledge::EvidenceRef>,
+        search_degraded: bool,
+    ) -> Result<(String, crate::llm::provider::CompletionStats), String> {
+        let sink = ResponseSink::new(Some(app_handle), identity, cancel_flag.clone());
 
         // Build the prompt using configurable flags.
         // The system prompt IS the only instruction (per-action editable + composed instructions).
@@ -132,36 +179,38 @@ impl IntelligenceEngine {
         );
 
         // Check for cancellation before starting
-        if cancel_flag.load(Ordering::SeqCst) {
-            return Ok(());
+        if cancel_flag.is_cancelled() {
+            return Err("Answer cancelled.".into());
         }
 
-        // Extract actual messages for the call log
-        let system_msg = messages.iter()
-            .find(|m| m.role == "system")
-            .map(|m| m.content.clone())
-            .unwrap_or_default();
-        let user_msg = messages.iter()
-            .find(|m| m.role == "user")
-            .map(|m| m.content.clone())
-            .unwrap_or_default();
-
-        // Emit stream start with actual prompt data
-        let _ = app_handle.emit(
+        sink.phase("generating", None);
+        // Emit stream start with source metadata; prompt contents remain private
+        let _ = sink.emit(
             "llm_stream_start",
             crate::llm::provider::StreamStartPayload {
                 mode: mode.to_string(),
                 model: model.clone(),
                 provider: provider_name.clone(),
-                system_prompt: system_msg,
-                user_prompt: user_msg,
+                evidence,
+                search_degraded,
+                question: custom_question
+                    .map(str::to_owned)
+                    .or_else(|| last_question.as_ref().map(|q| q.text.clone())),
+                system_prompt: String::new(),
+                user_prompt: String::new(),
                 include_transcript,
                 include_rag,
                 include_instructions,
                 include_question,
                 temperature,
                 rag_query,
-                rag_chunks,
+                rag_chunks: rag_chunks
+                    .into_iter()
+                    .map(|mut c| {
+                        c.text.clear();
+                        c
+                    })
+                    .collect(),
                 rag_chunks_filtered,
                 rag_total_candidates,
                 transcript_window_seconds,
@@ -170,31 +219,36 @@ impl IntelligenceEngine {
             },
         );
 
-        // Call the LLM provider's stream_completion
-        let provider_guard = llm_provider.lock().await;
-        let result = provider_guard
-            .stream_completion(messages, &model, params, app_handle.clone())
-            .await;
+        crate::llm::request::complete_unfinished(
+            llm_provider.as_ref(),
+            messages,
+            &model,
+            params,
+            sink.clone(),
+        )
+        .await
+        .map(|stats| (sink.text(), stats))
+        .map_err(|e| crate::llm::request::user_error(&e))
+    }
 
-        match result {
-            Ok(_stats) => {
-                // stream_completion already emits llm_stream_end
-                Ok(())
-            }
-            Err(e) => {
-                let _ = app_handle.emit("llm_stream_error", e.to_string());
-                Err(e.to_string())
-            }
+    /// Reserve the live generation slot until every exit path has unwound.
+    pub fn begin_generation(&mut self) -> Result<GenerationLease, String> {
+        if self.is_generating.swap(true, Ordering::SeqCst) {
+            return Err("Generation already in progress".into());
         }
+        self.cancel_requested = CancellationToken::new();
+        Ok(GenerationLease {
+            generating: self.is_generating.clone(),
+        })
     }
 
     /// Cancel the current generation.
     pub fn cancel(&self) {
-        self.cancel_requested.store(true, Ordering::SeqCst);
+        self.cancel_requested.cancel();
     }
 
     /// Get the cancel flag for passing to async tasks.
-    pub fn cancel_flag(&self) -> Arc<AtomicBool> {
+    pub fn cancel_flag(&self) -> CancellationToken {
         self.cancel_requested.clone()
     }
 
@@ -257,10 +311,97 @@ impl IntelligenceEngine {
     /// Reset per-meeting state so the next meeting starts clean.
     /// Clears the transcript buffer and last detected question.
     pub fn clear_session(&mut self) {
+        self.session = session::Session::default();
         self.transcript_buffer.clear();
         self.last_detected_question = None;
-        self.cancel_requested.store(false, std::sync::atomic::Ordering::SeqCst);
-        self.is_generating.store(false, std::sync::atomic::Ordering::SeqCst);
+        self.seen_segments.clear();
+        self.cancel_requested.cancel();
+        // The old lease must not release the next meeting's generation slot.
+        self.cancel_requested = CancellationToken::new();
+        self.is_generating = Arc::new(AtomicBool::new(false));
         log::info!("[intelligence] session cleared for new meeting");
+    }
+}
+
+/// Dropping a request (including a failed preparation or cancelled future) releases the slot.
+pub struct GenerationLease {
+    generating: Arc<AtomicBool>,
+}
+impl Drop for GenerationLease {
+    fn drop(&mut self) {
+        self.generating.store(false, Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    #[test]
+    fn failed_preparation_releases_the_slot_and_old_session_cannot_release_new_request() {
+        let mut e = IntelligenceEngine::new();
+        let old = e.begin_generation().unwrap();
+        assert!(e.begin_generation().is_err());
+        drop(old);
+        assert!(!e.is_generating());
+        let old = e.begin_generation().unwrap();
+        e.clear_session();
+        let new = e.begin_generation().unwrap();
+        drop(old);
+        assert!(e.is_generating());
+        drop(new);
+        assert!(!e.is_generating());
+    }
+    #[test]
+    fn failed_transcript_write_does_not_advance_or_deduplicate_retry() {
+        let mut e = IntelligenceEngine::new();
+        assert!(e
+            .push_transcript_persisted(
+                "How does it work?".into(),
+                "them".into(),
+                1000,
+                true,
+                || Err("disk full".into())
+            )
+            .is_err());
+        assert_eq!(e.session.sequence, 0);
+        assert!(e.transcript_buffer.get_recent_text(60).is_empty());
+        e.push_transcript_persisted(
+            "How does it work?".into(),
+            "them".into(),
+            1000,
+            true,
+            || Ok(()),
+        )
+        .unwrap();
+        assert_eq!(e.session.sequence, 1);
+        e.push_transcript_persisted(
+            "How does it work?".into(),
+            "them".into(),
+            1001,
+            true,
+            || panic!("duplicate must not write"),
+        )
+        .unwrap();
+        assert_eq!(e.session.sequence, 1);
+    }
+    #[test]
+    fn both_party_transcripts_deduplicate_and_me_does_not_cancel_question_detection() {
+        let mut e = IntelligenceEngine::new();
+        e.push_transcript("How does".into(), "Them".into(), 1000, true);
+        e.push_transcript("the pipeline work?".into(), "them".into(), 2000, true);
+        assert_eq!(
+            e.transcript_buffer.recent_party_text("them", 6000),
+            "How does the pipeline work?"
+        );
+        e.push_transcript(
+            "the pipeline work?".into(),
+            "Interviewer".into(),
+            2001,
+            true,
+        );
+        assert_eq!(e.session.sequence, 2);
+        e.push_transcript("Let me check".into(), "User".into(), 3000, true);
+        assert_eq!(e.session.sequence, 3);
+        assert_eq!(e.session.question_sequence, 2);
     }
 }

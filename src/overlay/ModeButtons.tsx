@@ -74,7 +74,7 @@ export function ModeButtons() {
   const aiReplyLanguage = useConfigStore((s) => s.aiReplyLanguage);
   const setAiReplyLanguage = useConfigStore((s) => s.setAiReplyLanguage);
   const [askInputText, setAskInputText] = useState("");
-  const [askInputVisible, setAskInputVisible] = useState(false);
+  const [askInputVisible, setAskInputVisible] = useState(true);
 
   // Listen for keyboard shortcut (Digit5) to toggle ask input
   useEffect(() => {
@@ -128,7 +128,9 @@ export function ModeButtons() {
         setAskInputVisible((v) => !v);
         return;
       }
-      generateAssist(mode).catch((err) => showToast(err instanceof Error ? err.message : "Couldn't generate AI response", "error"));
+      const answer = useStreamStore.getState();
+      const transform = mode === "Shorten" || mode === "FollowUp";
+      generateAssist(mode, transform ? `${mode === "Shorten" ? "Shorten this answer while retaining citations" : "Suggest a follow-up to this answer"}:\n${answer.currentContent}` : undefined, transform ? answer.currentEvidence : undefined).catch((err) => showToast(err instanceof Error ? err.message : "Couldn't generate AI response", "error"));
     },
     [isStreaming, currentMode]
   );
@@ -140,7 +142,6 @@ export function ModeButtons() {
       showToast(err instanceof Error ? err.message : "Couldn't send question", "error")
     );
     setAskInputText("");
-    setAskInputVisible(false);
   }, [askInputText, isStreaming]);
 
   return (
@@ -188,7 +189,7 @@ export function ModeButtons() {
       </div>
 
       {/* Inline Ask input */}
-      {askInputVisible && !isStreaming && (
+      {askInputVisible && (
         <div className="flex items-center gap-1.5 rounded-lg border border-info/20 bg-info/5 px-2 py-1 slide-down-enter">
           <input
             type="text"
@@ -201,13 +202,12 @@ export function ModeButtons() {
             }}
             placeholder="Ask about the meeting..."
             aria-label="Ask a question"
-            autoFocus
             maxLength={2000}
             className="flex-1 min-w-0 bg-transparent text-xs text-foreground/90 placeholder:text-muted-foreground/50 outline-none"
           />
           <button
             onClick={handleAskSubmit}
-            disabled={!askInputText.trim()}
+            disabled={!askInputText.trim() || isStreaming}
             className="rounded-md p-1 text-info/60 hover:bg-info/10 hover:text-info disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             aria-label="Send question"
             title="Send this question to the assistant."

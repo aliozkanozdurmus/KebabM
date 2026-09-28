@@ -310,6 +310,33 @@ fn load_tokenizer(path: &std::path::Path) -> Result<tokenizers::Tokenizer, Strin
         .map_err(|e| format!("Tokenizer load failed: {}", e))
 }
 
+#[cfg(test)]
+mod tokenizer_compat_tests {
+    use super::{extract_special_tokens, load_tokenizer};
+
+    #[test]
+    fn null_precompiled_normalizer_and_special_tokens_survive_upgrade() {
+        let path = std::env::temp_dir().join(format!("meetinghelper-tokenizer-{}.json", uuid::Uuid::new_v4()));
+        // Small local fixture tests the Marian export compatibility path without model downloads.
+        let fixture = serde_json::json!({
+            "version": "1.0", "truncation": null, "padding": null, "added_tokens": [],
+            "normalizer": { "type": "Precompiled", "precompiled_charsmap": null },
+            "pre_tokenizer": { "type": "WhitespaceSplit" },
+            "post_processor": null, "decoder": null,
+            "model": { "type": "WordLevel", "unk_token": "<unk>",
+                "vocab": { "<unk>": 0, "</s>": 1, "<pad>": 2, "merhaba": 3, "dünya": 4 } }
+        });
+        std::fs::write(&path, fixture.to_string()).unwrap();
+        let result = load_tokenizer(&path);
+        std::fs::remove_file(&path).unwrap();
+        let tokenizer = result.unwrap();
+        assert_eq!(extract_special_tokens(&tokenizer), (1, 2));
+        assert_eq!(tokenizer.encode("merhaba dünya", true).unwrap().get_ids(), &[3, 4]);
+        assert_eq!(tokenizer.decode(&[3, 4], true).unwrap(), "merhaba dünya");
+        assert_eq!(tokenizer.encode("unknown", true).unwrap().get_ids(), &[0]);
+    }
+}
+
 /// Read num_heads and head_dim from config.json. Falls back to MarianMT defaults.
 fn read_model_config(config_path: &std::path::Path) -> (usize, usize) {
     if let Ok(raw) = std::fs::read_to_string(config_path) {

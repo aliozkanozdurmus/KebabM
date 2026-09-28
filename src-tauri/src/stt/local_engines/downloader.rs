@@ -108,7 +108,7 @@ pub async fn download_file(
     // Verify SHA256 if a hash is provided
     if !sha256_expected.is_empty() {
         emit(downloaded, total_size, "verifying");
-        let hash = format!("{:x}", hasher.finalize());
+        let hash = hasher.finalize().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
         if hash != sha256_expected {
             let _ = tokio::fs::remove_file(&tmp_path).await;
             emit(downloaded, total_size, "error");

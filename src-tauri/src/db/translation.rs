@@ -146,6 +146,6 @@ pub fn count_meeting_translations(
     conn.query_row(
         "SELECT COUNT(*) FROM transcript_translations WHERE meeting_id = ?1 AND target_lang = ?2",
         params![meeting_id, target_lang],
-        |row| row.get::<_, usize>(0),
+        |row| crate::db::row_size(row,0),
     )
 }

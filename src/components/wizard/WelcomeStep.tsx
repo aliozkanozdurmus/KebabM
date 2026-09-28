@@ -1,3 +1,4 @@
+import { BrandMark } from "../BrandMark";
 import { useEffect, useState } from "react";
 import { listAudioDevices } from "../../lib/ipc";
 import type { AudioDeviceList } from "../../lib/types";
@@ -7,7 +8,6 @@ import {
   CheckCircle,
   XCircle,
   Loader2,
-  Sparkles,
 } from "lucide-react";
 
 interface DetectionResult {
@@ -143,11 +143,11 @@ export function WelcomeStep({ onDetectionComplete }: WelcomeStepProps) {
     <div className="flex flex-col items-center text-center">
       {/* Welcome header */}
       <div className="mb-10">
-        <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
-          <Sparkles className="h-8 w-8 text-primary" />
+        <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center">
+          <BrandMark className="h-20 w-20" />
         </div>
         <h2 className="text-2xl font-semibold text-foreground">
-          Welcome to zaiqoM
+          Welcome to ZaiqoM-MeetingHelper
         </h2>
         <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
           Let's get your AI meeting assistant set up. This will only take a

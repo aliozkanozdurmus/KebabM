@@ -1,3 +1,4 @@
+import { BrandMark } from "../components/BrandMark";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useMeetingStore } from "../stores/meetingStore";
 import { useConfigStore } from "../stores/configStore";
@@ -8,6 +9,7 @@ import { showToast } from "../stores/toastStore";
 import { RecentMeetings } from "./RecentMeetings";
 import { MeetingDetails } from "./meeting-details";
 import { MeetingSetupModal } from "./MeetingSetupModal";
+import { ProjectWorkspace } from "./ProjectWorkspace";
 import { ProjectPanel } from "./ProjectPanel";
 import { FileUpload } from "../context/FileUpload";
 import { ResourceCard } from "../context/ResourceCard";
@@ -90,6 +92,7 @@ export function LauncherView() {
   const [showTestKB, setShowTestKB] = useState(false);
   const [showMeetingSetup, setShowMeetingSetup] = useState(false);
   const [platform, setPlatform] = useState<PlatformCapabilities | null>(null);
+  const [workspaceTab, setWorkspaceTab] = useState<"prepare" | "history">("prepare");
   const [focusProjectId, setFocusProjectId] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [generalContext, setGeneralContext] = useState<string | null>(null);
@@ -252,19 +255,19 @@ export function LauncherView() {
 
   if (selectedMeetingId) {
     return (
-      <div className="flex h-full flex-col bg-background">
+      <div className="app-surface flex h-full flex-col bg-background">
         <MeetingDetails meetingId={selectedMeetingId} onBack={() => setSelectedMeetingId(null)} />
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="app-surface flex h-full flex-col bg-background">
       {/* ═══ HEADER ═══ */}
-      <header className="dash-header flex h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 text-foreground">
+      <header className="dash-header flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 text-foreground">
         <div className="flex items-center gap-3">
-          <img src="/zaiqom-icon.png" alt="" className="h-5 w-5" />
-          <span className="text-sm font-normal tracking-normal">zaiqoM</span>
+          <BrandMark decorative className="h-8 w-8" />
+          <span className="text-sm font-medium tracking-normal">ZaiqoM-MeetingHelper</span>
         </div>
 
         {/* Active meeting in header */}
@@ -310,13 +313,20 @@ export function LauncherView() {
           selectedMeetingId={selectedMeetingId}
           focusProjectId={focusProjectId}
           onSelectMeeting={handleSelectMeeting}
-          onFocusProject={setFocusProjectId}
+          onFocusProject={(id) => { setFocusProjectId(id); setWorkspaceTab("prepare"); }}
           onProjects={setProjects}
           onChanged={() => {
             loadRecentMeetings();
           }}
         />
 
+        <main className="flex min-w-0 flex-1 flex-col">
+          <nav className="flex shrink-0 gap-4 border-b border-border px-4" aria-label="Workspace">
+            <button className={`py-3 text-sm border-b-2 ${workspaceTab === "prepare" ? "border-primary" : "border-transparent text-muted-foreground"}`} onClick={() => setWorkspaceTab("prepare")}>Projects & preparation</button>
+            <button className={`py-3 text-sm border-b-2 ${workspaceTab === "history" ? "border-primary" : "border-transparent text-muted-foreground"}`} onClick={() => setWorkspaceTab("history")}>Meeting history</button>
+          </nav>
+          {startError && <p role="alert" className="px-4 py-2 text-sm text-destructive">{startError}</p>}
+          {workspaceTab === "prepare" ? <ProjectWorkspace key={focusProjectId ?? "active"} project={projects.find(p => p.id === focusProjectId) ?? (focusProjectId !== "unassigned" ? projects.find(p => p.is_active) : undefined)} onChanged={() => { loadRecentMeetings(); }} /> : <>
         {/* ── MEETINGS, GROUPED BY PROJECT ── */}
         <div className="dash-main flex min-w-0 flex-1 flex-col bg-background">
           {/* Search */}
@@ -396,62 +406,8 @@ export function LauncherView() {
           </div>
         </div>
 
-        {/* ── RIGHT: CONTEXT + START ── */}
-        <aside className="dash-sidebar flex w-[320px] shrink-0 flex-col overflow-y-auto border-l border-border/10 bg-card/20">
-          <div className="space-y-4 px-4 py-4">
-            {platform && !platform.stealth && (
-              <p className="rounded-lg border border-border/30 bg-background/50 px-3 py-2 text-meta text-muted-foreground">
-                Hiding this window from screen share works on Windows.
-              </p>
-            )}
-            {startError && (
-              <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
-                {startError}
-              </div>
-            )}
-            {/* Section label */}
-            <div className="dash-section-enter flex items-center gap-2 pt-1">
-              <Database className="h-3 w-3 text-muted-foreground/60" />
-              <span className="text-meta font-semibold uppercase tracking-wider text-muted-foreground/60">
-                Meeting Context
-              </span>
-              <div className="flex-1 border-t border-border/20" />
-            </div>
-
-            {(() => {
-              if (generalContext !== null) {
-                return (
-                  <div className="space-y-2 text-xs text-muted-foreground">
-                    <p className="text-sm text-foreground">General</p>
-                    <p>The meeting uses the context you pasted.</p>
-                    <p className="whitespace-pre-wrap border border-border/30 bg-background/40 p-2 text-foreground/80">
-                      {generalContext.trim() || "No notes pasted."}
-                    </p>
-                  </div>
-                );
-              }
-              const focused = projects.find((project) => project.id === focusProjectId)
-                ?? projects.find((project) => project.is_active)
-                ?? projects.find((project) => project.brief);
-              if (!focused) {
-                return <p className="text-xs text-muted-foreground">Choose a project, or start a General meeting and paste the context.</p>;
-              }
-              return (
-                <div className="space-y-2 text-xs text-muted-foreground">
-                  <p className="text-sm text-foreground">{focused.name}</p>
-                  <p className="break-all">{focused.root_path}\zaiqo-meet</p>
-                  <p>{focused.brief ? "The meeting reads this knowledge base." : "Build knowledge on the project to write zaiqo-meet."}</p>
-                  {focused.brief && (
-                    <p className="whitespace-pre-wrap border border-border/30 bg-background/40 p-2 text-foreground/80">
-                      {focused.brief.slice(0, 1600)}
-                    </p>
-                  )}
-                </div>
-              );
-            })()}
-
-          </div>
-        </aside>
+        </>}
+        </main>
       </div>
 
       {/* ═══ FOOTER ═══ */}
@@ -460,7 +416,7 @@ export function LauncherView() {
         <div className="flex items-center gap-2 pr-5 text-xs text-muted-foreground/60">
           <span>&copy; {new Date().getFullYear()} {NEXQ_DEVELOPER}</span>
           <span className="text-muted-foreground/40">|</span>
-          <span className="font-medium">zaiqoM v{NEXQ_VERSION}</span>
+          <span className="font-medium">v{NEXQ_VERSION}</span>
         </div>
       </footer>
 

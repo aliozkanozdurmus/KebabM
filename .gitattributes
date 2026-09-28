@@ -1,0 +1,5 @@
+
+# Preserve binary test fixtures without text normalization.
+*.pdf binary
+*.docx binary
+*.bz2 binary

@@ -1,3 +1,4 @@
+import { readingColor } from "../../lib/readingColor";
 import { useRef, useEffect, useMemo, useState, useCallback } from "react";
 import type { TranscriptSegment, SpeakerIdentity, MeetingBookmark, TranslationResult, TranslationDisplayMode } from "../../lib/types";
 import type { TranscriptSearchState } from "../../hooks/useTranscriptSearch";
@@ -456,7 +457,7 @@ export function TranscriptView({ segments, search, meetingStartTime, recordingOf
                     className="leading-relaxed"
                     style={{
                       fontSize: `${transcriptFontSize}px`,
-                      color: isSelected ? undefined : transcriptTextColor,
+                      color: isSelected ? undefined : readingColor(transcriptTextColor, "transcript"),
                     }}
                   >
                     {offsets
@@ -481,7 +482,7 @@ export function TranscriptView({ segments, search, meetingStartTime, recordingOf
                     if (segTranslation && translationDisplayMode === "inline") {
                       return (
                         <div className="mt-1 flex items-baseline gap-1.5 leading-[1.5]">
-                          <span style={{ fontSize: `${translationFontSize}px`, color: translationTextColor }}>
+                          <span style={{ fontSize: `${translationFontSize}px`, color: readingColor(translationTextColor, "translation") }}>
                             {segTranslation.translated_text}
                           </span>
                           <span className={`shrink-0 rounded px-1 py-px text-[9px] font-bold tracking-wide ${
@@ -715,7 +716,7 @@ export function TranscriptView({ segments, search, meetingStartTime, recordingOf
             top: `${Math.max(8, hoverTranslation.y - 90)}px`,
           }}
         >
-          <p style={{ fontSize: `${translationFontSize + 1}px`, color: translationTextColor }} className="leading-[1.6]">
+          <p style={{ fontSize: `${translationFontSize + 1}px`, color: readingColor(translationTextColor, "translation") }} className="leading-[1.6]">
             {hoverTranslation.translation.translated_text}
           </p>
           <div className="mt-1.5 flex items-center gap-1.5 text-[0.6rem] text-muted-foreground/50">

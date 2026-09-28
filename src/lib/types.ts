@@ -53,6 +53,9 @@ export interface TranscriptSegment {
   text: string;
   speaker: Speaker;
   speaker_id?: string;
+  source?: "me" | "them" | "room";
+  sequence?: number;
+  sessionId?: string;
   timestamp_ms: number;
   is_final: boolean;
   confidence: number;
@@ -184,6 +187,10 @@ export interface NoisePreset {
 // == AI/LLM TYPES ==
 
 export interface AIInteraction {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total_tokens?: number;
+  evidence?: EvidenceRef[];
   id: string;
   meeting_id: string;
   mode: IntelligenceMode;
@@ -211,7 +218,26 @@ export interface StreamSource {
   url: string;
 }
 
+export interface EvidenceRef {
+  id: string;
+  projectId: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  revision: string;
+  contentHash: string;
+  sourceType: string;
+  dirty: boolean;
+}
+
 export interface AIResponse {
+  promptTokens?: number;
+  completionTokens?: number;
+  question?: string;
+  evidence?: EvidenceRef[];
+  searchDegraded?: boolean;
+  sessionId?: string;
+  totalTokens?: number;
   id: string;
   content: string;
   mode: IntelligenceMode;
@@ -224,6 +250,8 @@ export interface AIResponse {
 }
 
 export interface ModelInfo {
+  max_output_tokens?: number | null;
+  capabilities?: Record<string, unknown> | null;
   id: string;
   name: string;
   provider: string;
@@ -473,6 +501,7 @@ export type ThemeMode = "dark" | "light" | "system";
 
 export interface AppConfig {
   theme: ThemeMode;
+  appearance: import("./appearances").AppearanceId;
   stt_provider: STTProviderType;
   llm_provider: LLMProviderType;
   llm_model: string;
@@ -520,11 +549,21 @@ export interface TranscriptUpdateEvent {
   segment: TranscriptSegment;
 }
 
-export interface StreamTokenEvent {
+export interface RequestIdentity {
+  requestId?: string;
+  sessionId?: string;
+  questionId?: string;
+}
+
+export interface StreamTokenEvent extends RequestIdentity {
   token: string;
 }
 
-export interface StreamStartEvent {
+export interface StreamStartEvent extends RequestIdentity {
+  search_degraded?: boolean;
+  evidence?: EvidenceRef[];
+  searchDegraded?: boolean;
+  question?: string;
   mode: IntelligenceMode;
   model: string;
   provider: string;
@@ -545,12 +584,14 @@ export interface StreamStartEvent {
   transcript_segments_total: number;
 }
 
-export interface StreamEndEvent {
+export interface StreamEndEvent extends RequestIdentity {
+  prompt_tokens?: number;
+  completion_tokens?: number;
   total_tokens: number;
   latency_ms: number;
 }
 
-export interface StreamSourcesEvent {
+export interface StreamSourcesEvent extends RequestIdentity {
   sources: StreamSource[];
 }
 
@@ -833,4 +874,15 @@ export interface UpdateDownloadProgress {
 
 export interface UpdateReadyEvent {
   version: string;
+}
+
+/** Request lifecycle metadata. Tokens and evidence use the same RequestIdentity. */
+export interface AssistEvent {
+  question?: string;
+  mode?: IntelligenceMode;
+  sessionId: string;
+  requestId: string;
+  questionId?: string;
+  status: "detected" | "searching" | "generating" | "completed" | "error" | "cancelled";
+  error?: string;
 }

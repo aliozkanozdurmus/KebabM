@@ -1,5 +1,5 @@
 // src-tauri/src/commands/translation_commands.rs
-use tauri::{command, AppHandle, Emitter, Listener};
+use tauri::{command, AppHandle, Emitter};
 use crate::state::AppState;
 use crate::translation::{
     TranslationProviderType, TranslationResult, ConnectionStatus, Language,
@@ -257,7 +257,7 @@ pub async fn translate_batch(
         let total: usize = db.connection().query_row(
             "SELECT COUNT(*) FROM transcript_segments WHERE meeting_id = ?1 AND is_final = 1",
             [&meeting_id],
-            |row| row.get(0),
+            |row| crate::db::row_size(row,0),
         ).map_err(|e| e.to_string())?;
 
         let already_done = crate::db::translation::count_meeting_translations(
@@ -504,35 +504,11 @@ async fn translate_via_llm(
         router.active_model().to_string()
     };
 
-    // Set up a buffer to collect streamed tokens
-    let buffer = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-    let buffer_clone = buffer.clone();
-
-    // Listen for stream tokens and collect them
-    let listener_id = app.listen("llm_stream_token", move |event| {
-        if let Ok(payload) = serde_json::from_str::<crate::llm::provider::StreamTokenPayload>(event.payload()) {
-            if let Ok(mut buf) = buffer_clone.lock() {
-                buf.push_str(&payload.token);
-            }
-        }
-    });
-
-    let params = crate::llm::provider::GenerationParams::default();
-    let provider = provider_arc.lock().await;
-    let result = provider.stream_completion(
-        messages, &model, params, app.clone()
-    ).await;
-
-    // Stop listening
-    app.unlisten(listener_id);
-
-    // Check for errors
-    result.map_err(|e| format!("LLM translation failed: {}", e))?;
-
-    // Extract collected text
-    let collected = buffer.lock()
-        .map_err(|_| "Buffer lock poisoned".to_string())?
-        .clone();
+    let sink = crate::llm::request::ResponseSink::private();
+    crate::llm::request::complete(provider_arc.as_ref(), messages, &model,
+        crate::llm::provider::GenerationParams::default(), sink.clone())
+        .await.map_err(|e| format!("LLM translation failed: {e}"))?;
+    let collected = sink.text();
 
     if collected.is_empty() {
         return Err("LLM returned empty translation".to_string());

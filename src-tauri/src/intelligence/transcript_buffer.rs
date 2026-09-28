@@ -73,8 +73,9 @@ impl TranscriptBuffer {
         for seg in &self.segments {
             if seg.timestamp_ms >= cutoff_ms && seg.is_final {
                 let speaker_label = match seg.speaker.as_str() {
-                    "User" => "You",
-                    "Interviewer" => "Interviewer",
+                    "User" | "me" => "You",
+                    "Interviewer" | "them" | "Them" => "Them",
+                    "room" => "Room",
                     _ => "Unknown",
                 };
                 parts.push(format!("[{}]: {}", speaker_label, seg.text));
@@ -90,14 +91,27 @@ impl TranscriptBuffer {
         for seg in &self.segments {
             if seg.is_final {
                 let speaker_label = match seg.speaker.as_str() {
-                    "User" => "You",
-                    "Interviewer" => "Interviewer",
+                    "User" | "me" => "You",
+                    "Interviewer" | "them" | "Them" => "Them",
+                    "room" => "Room",
                     _ => "Unknown",
                 };
                 parts.push(format!("[{}]: {}", speaker_label, seg.text));
             }
         }
         parts.join("\n")
+    }
+
+    /// Merge adjacent final segments from the same audio source, within one speech turn.
+    pub fn recent_party_text(&self, source: &str, span_ms:u64)->String {
+        let party=match source.to_lowercase().as_str(){"user"|"you"|"me"=>"me","room"=>"room",_=>"them"};
+        let latest=self.segments.back().map(|s|s.timestamp_ms).unwrap_or(0);
+        let mut texts=Vec::new();
+        for s in self.segments.iter().rev().filter(|s|s.is_final){
+            if s.speaker!=party || latest.saturating_sub(s.timestamp_ms)>span_ms{break;}
+            texts.push(s.text.clone());
+        }
+        texts.reverse();texts.join(" ")
     }
 
     /// Clear all segments from the buffer.

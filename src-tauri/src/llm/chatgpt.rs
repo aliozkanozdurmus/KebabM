@@ -1,5 +1,4 @@
 use futures::StreamExt;
-use tauri::Emitter;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -68,6 +67,7 @@ fn static_models() -> Vec<ModelInfo> {
     ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"]
         .into_iter()
         .map(|id| ModelInfo {
+                            max_output_tokens: None, capabilities: None,
             id: id.to_string(),
             name: id.to_string(),
             provider: "chatgpt".to_string(),
@@ -123,7 +123,7 @@ impl LLMProvider for ChatGptClient {
         messages: Vec<LLMMessage>,
         model: &str,
         _params: GenerationParams,
-        app_handle: tauri::AppHandle,
+        app_handle: super::request::ResponseSink,
     ) -> Result<CompletionStats, LLMError> {
         let start = Instant::now();
         let input: Vec<serde_json::Value> = messages
@@ -165,8 +165,7 @@ impl LLMProvider for ChatGptClient {
         let mut token_count = 0u64;
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(LLMError::HttpError)?;
-            let text = String::from_utf8_lossy(&chunk);
-            for line in line_buffer.push(&text) {
+            for line in line_buffer.push_bytes(&chunk) {
                 for event in SSEParser::parse_chunk(&line) {
                     if let Some(data) = event {
                         if let Some(token) = response_delta(&data) {

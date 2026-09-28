@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { appearanceVariables } from "../lib/appearances";
+import { useLayoutEffect } from "react";
 import { useConfigStore } from "../stores/configStore";
 
 /**
@@ -9,12 +10,20 @@ import { useConfigStore } from "../stores/configStore";
 export function useTheme() {
   const theme = useConfigStore((s) => s.theme);
 
-  useEffect(() => {
+  const appearance = useConfigStore((s) => s.appearance);
+
+  useLayoutEffect(() => {
     const root = document.documentElement;
 
+    let appliedKeys: string[] = [];
+    root.dataset.appearance = appearance;
     function applyTheme(mode: "dark" | "light") {
       root.classList.remove("dark", "light");
       root.classList.add(mode);
+      for (const key of appliedKeys) root.style.removeProperty(key);
+      const vars = appearanceVariables(appearance, mode);
+      for (const [key, value] of Object.entries(vars)) root.style.setProperty(key, value);
+      appliedKeys = Object.keys(vars);
     }
 
     if (theme === "system") {
@@ -29,10 +38,12 @@ export function useTheme() {
       mediaQuery.addEventListener("change", handler);
 
       return () => {
+        for (const key of appliedKeys) root.style.removeProperty(key);
         mediaQuery.removeEventListener("change", handler);
       };
     } else {
       applyTheme(theme);
+      return () => { for (const key of appliedKeys) root.style.removeProperty(key); };
     }
-  }, [theme]);
+  }, [theme, appearance]);
 }

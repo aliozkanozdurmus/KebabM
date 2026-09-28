@@ -132,7 +132,7 @@ async fn wait_for_callback(listener: tokio::net::TcpListener) -> Result<(String,
         .and_then(|line| line.split_whitespace().nth(1))
         .unwrap_or("/");
 
-    let page = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<!doctype html><title>zaiqoM</title><p>Signed in with ChatGPT. You can close this window.</p>";
+    let page = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n<!doctype html><title>ZaiqoM-MeetingHelper</title><p>Signed in with ChatGPT. You can close this window.</p>";
     let _ = socket.write_all(page.as_bytes()).await;
 
     let parsed = url::Url::parse(&format!("http://localhost{path}")).map_err(|e| e.to_string())?;

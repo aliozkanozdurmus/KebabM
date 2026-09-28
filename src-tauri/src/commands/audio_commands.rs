@@ -1,4 +1,6 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
+#[cfg(target_os = "windows")]
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use tauri::{command, AppHandle, Emitter, Manager};
@@ -154,7 +156,7 @@ pub async fn start_capture(
     // configurable pause threshold, producing longer, more readable lines.
     if has_system_stt {
         let stt_app = app.clone();
-        let intel_arc = app.state::<AppState>().intelligence.clone();
+        let capture_session = crate::intelligence::session::current_id(&app);
         let pause_threshold = app.state::<AppState>().pause_threshold_ms.clone();
         tokio::spawn(async move {
             use std::sync::atomic::Ordering;
@@ -184,22 +186,8 @@ pub async fn start_capture(
                             "confidence": output.confidence
                         }
                     });
-                    let _ = stt_app.emit(event_name, &payload);
+                    crate::intelligence::session::emit_native(&stt_app,event_name,payload,capture_session.as_deref());
 
-                    // Push final segments to the intelligence engine's
-                    // transcript buffer so the AI has access to what "Them" said.
-                    if output.is_final {
-                        if let Some(ref intel) = intel_arc {
-                            if let Ok(mut engine) = intel.lock() {
-                                engine.push_transcript(
-                                    output.text.clone(),
-                                    "Them".to_string(),
-                                    output.timestamp_ms,
-                                    true,
-                                );
-                            }
-                        }
-                    }
                 }
             }
         });
@@ -562,7 +550,7 @@ fn read_all_peaks_raw() -> Vec<DevicePeakLevel> {
 /// matching the format that cpal uses for device names.
 #[cfg(target_os = "windows")]
 fn get_device_friendly_name(device: &windows::Win32::Media::Audio::IMMDevice) -> Option<String> {
-    use windows::Win32::UI::Shell::PropertiesSystem::PROPERTYKEY;
+    use windows::Win32::Foundation::PROPERTYKEY;
     use windows::core::GUID;
     unsafe {
         // PKEY_Device_FriendlyName = {a45c254e-df1c-4efd-8020-67d146a850e0}, 14
@@ -729,6 +717,8 @@ fn run_device_monitor_loop(app: tauri::AppHandle, stop: Arc<AtomicBool>) {
 /// Idempotent — stops any running monitor first, waits for it to exit, then starts fresh.
 #[command]
 pub async fn start_device_monitor(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(not(target_os = "windows"))]
+    let _ = &app;
     #[cfg(target_os = "windows")]
     {
         let state = app.state::<crate::state::AppState>();
@@ -755,6 +745,8 @@ pub async fn start_device_monitor(app: tauri::AppHandle) -> Result<(), String> {
 /// Stop the Live Monitor background thread.
 #[command]
 pub async fn stop_device_monitor(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(not(target_os = "windows"))]
+    let _ = &app;
     #[cfg(target_os = "windows")]
     {
         let state = app.state::<crate::state::AppState>();
@@ -946,80 +938,50 @@ pub async fn start_capture_per_party(
         }));
     }
 
-    {
-        let mut guard = state
-            .audio
-            .lock()
-            .map_err(|_| "Audio state lock poisoned".to_string())?;
-        let mgr = guard.get_or_insert_with(AudioCaptureManager::new);
-        log::info!(
-            "AudioCaptureManager::start_capture mic='{}', system='{}'",
-            mic_device, system_device
-        );
-        mgr.start_capture(&mic_device, &system_device, system_is_input, tx)?;
-    }
-
-    // ── Create STT provider for "You" party (if not web_speech) ──
-    let you_stt = create_stt_provider_for_party(&you, &state, &app, "You").await?;
-
-    // ── Create STT provider for "Them" party (if not web_speech) ──
-    let them_stt = create_stt_provider_for_party(&them, &state, &app, "Them").await?;
-
-    // Start STT streams
+    // Validate both providers before opening devices. A failed STT startup must not
+    // leave capture running or report a ready meeting.
+    let providers = async {
+        let you_stt = create_stt_provider_for_party(&you, &state, &app, "You").await?;
+        let them_stt = create_stt_provider_for_party(&them, &state, &app, "Them").await?;
+        Ok::<_, String>((you_stt, them_stt))
+    }.await;
+    let (mut you_stt_provider, mut them_stt_provider) = match providers {
+        Ok(providers) => providers,
+        Err(error) => {
+            restore_default_device_if_overridden(&state, &app);
+            return Err(error);
+        }
+    };
     let (you_stt_tx, mut you_stt_rx) =
         mpsc::channel::<crate::stt::provider::TranscriptResult>(256);
     let (them_stt_tx, mut them_stt_rx) =
         mpsc::channel::<crate::stt::provider::TranscriptResult>(256);
 
-    let mut you_stt_provider = you_stt;
-    let mut them_stt_provider = them_stt;
-
-    if let Some(ref mut provider) = you_stt_provider {
-        crate::stt::emit_stt_debug(&app, "info", "stt",
-            &format!("Starting 'You' STT ({})", you.stt_provider));
-        match provider.start_stream(you_stt_tx).await {
-            Ok(()) => {
-                log::info!("'You' party STT started ({})", you.stt_provider);
-                crate::stt::emit_stt_debug(&app, "info", "stt",
-                    &format!("'You' STT started: {}", you.stt_provider));
-            }
-            Err(e) => {
-                log::warn!("Failed to start 'You' STT: {}", e);
-                crate::stt::emit_stt_debug(&app, "error", "stt",
-                    &format!("'You' STT failed to start: {}", e));
-                let _ = app.emit("stt_connection_status", serde_json::json!({
-                    "provider": you.stt_provider,
-                    "party": "You",
-                    "status": "error",
-                    "message": format!("Failed to start STT: {}", e)
-                }));
-                you_stt_provider = None;
+    let startup = async {
+        if let Some(provider) = you_stt_provider.as_mut() {
+            provider.start_stream(you_stt_tx).await
+                .map_err(|_| format!("Could not start your {} speech service. Check its connection and credentials.", you.stt_provider))?;
+        }
+        if let Some(provider) = them_stt_provider.as_mut() {
+            provider.start_stream(them_stt_tx).await
+                .map_err(|_| format!("Could not start the other speaker's {} speech service. Check its connection and credentials.", them.stt_provider))?;
+        }
+        let mut guard = state.audio.lock()
+            .map_err(|_| "Audio state lock poisoned".to_string())?;
+        let mgr = guard.get_or_insert_with(AudioCaptureManager::new);
+        mgr.start_capture(&mic_device, &system_device, system_is_input, tx)
+    }.await;
+    if let Err(error) = startup {
+        // Stop any partially started provider, including one whose startup failed.
+        for provider in [&mut you_stt_provider, &mut them_stt_provider] {
+            if let Some(provider) = provider.as_mut() {
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(3), provider.stop_stream()
+                ).await;
             }
         }
-    }
-
-    if let Some(ref mut provider) = them_stt_provider {
-        crate::stt::emit_stt_debug(&app, "info", "stt",
-            &format!("Starting 'Them' STT ({})", them.stt_provider));
-        match provider.start_stream(them_stt_tx).await {
-            Ok(()) => {
-                log::info!("'Them' party STT started ({})", them.stt_provider);
-                crate::stt::emit_stt_debug(&app, "info", "stt",
-                    &format!("'Them' STT started: {}", them.stt_provider));
-            }
-            Err(e) => {
-                log::warn!("Failed to start 'Them' STT: {}", e);
-                crate::stt::emit_stt_debug(&app, "error", "stt",
-                    &format!("'Them' STT failed to start: {}", e));
-                let _ = app.emit("stt_connection_status", serde_json::json!({
-                    "provider": them.stt_provider,
-                    "party": "Them",
-                    "status": "error",
-                    "message": format!("Failed to start STT: {}", e)
-                }));
-                them_stt_provider = None;
-            }
-        }
+        restore_default_device_if_overridden(&state, &app);
+        return Err(error);
     }
 
     // Unique session prefix to avoid segment ID collisions across mid-meeting restarts.
@@ -1036,6 +998,7 @@ pub async fn start_capture_per_party(
     // and whisper_cpp (dual-pass engine manages its own line breaking).
     if you_stt_provider.is_some() {
         let stt_app = app.clone();
+        let capture_session = crate::intelligence::session::current_id(&app);
         let prefix = session_prefix.clone();
         let use_accumulator = you.stt_provider != "web_speech"
             && you.stt_provider != "whisper_cpp";
@@ -1074,7 +1037,7 @@ pub async fn start_capture_per_party(
                                 "confidence": output.confidence
                             }
                         });
-                        let _ = stt_app.emit(event_name, &payload);
+                        crate::intelligence::session::emit_native(&stt_app,event_name,payload,capture_session.as_deref());
                     }
                 }
 
@@ -1091,7 +1054,7 @@ pub async fn start_capture_per_party(
                             "confidence": output.confidence
                         }
                     });
-                    let _ = stt_app.emit("transcript_final", &payload);
+                    crate::intelligence::session::emit_native(&stt_app,"transcript_final",payload,capture_session.as_deref());
                 }
             } else {
                 // Direct path: web_speech / whisper_cpp handle their own segmentation
@@ -1124,7 +1087,7 @@ pub async fn start_capture_per_party(
                             "confidence": result.confidence
                         }
                     });
-                    let _ = stt_app.emit(event_name, &payload);
+                    crate::intelligence::session::emit_native(&stt_app,event_name,payload,capture_session.as_deref());
                 }
             }
         });
@@ -1135,8 +1098,8 @@ pub async fn start_capture_per_party(
     // within the configurable pause threshold, producing longer lines.
     if them_stt_provider.is_some() {
         let stt_app = app.clone();
+        let capture_session = crate::intelligence::session::current_id(&app);
         let prefix = session_prefix.clone();
-        let intel_arc = app.state::<AppState>().intelligence.clone();
         let pause_threshold = app.state::<AppState>().pause_threshold_ms.clone();
         tokio::spawn(async move {
             use std::sync::atomic::Ordering;
@@ -1176,21 +1139,8 @@ pub async fn start_capture_per_party(
                         seg["speaker_id"] = serde_json::json!(sid);
                     }
                     let payload = serde_json::json!({ "segment": seg });
-                    let _ = stt_app.emit(event_name, &payload);
+                    crate::intelligence::session::emit_native(&stt_app,event_name,payload,capture_session.as_deref());
 
-                    // Push final segments to the intelligence engine
-                    if output.is_final {
-                        if let Some(ref intel) = intel_arc {
-                            if let Ok(mut engine) = intel.lock() {
-                                engine.push_transcript(
-                                    output.text.clone(),
-                                    "Them".to_string(),
-                                    output.timestamp_ms,
-                                    true,
-                                );
-                            }
-                        }
-                    }
                 }
             }
 
@@ -1214,18 +1164,7 @@ pub async fn start_capture_per_party(
                     seg["speaker_id"] = serde_json::json!(sid);
                 }
                 let payload = serde_json::json!({ "segment": seg });
-                let _ = stt_app.emit("transcript_final", &payload);
-
-                if let Some(ref intel) = intel_arc {
-                    if let Ok(mut engine) = intel.lock() {
-                        engine.push_transcript(
-                            output.text.clone(),
-                            "Them".to_string(),
-                            output.timestamp_ms,
-                            true,
-                        );
-                    }
-                }
+                crate::intelligence::session::emit_native(&stt_app,"transcript_final",payload,capture_session.as_deref());
             }
         });
     }
@@ -1878,6 +1817,9 @@ pub async fn ensure_ipolicy_override(app: AppHandle) -> Result<String, String> {
             })).map_err(|e| e.to_string());
         }
     };
+
+    #[cfg(not(target_os = "windows"))]
+    let _ = &target;
 
     // 3. Read current OS default (handles COM init internally)
     log::info!("IPolicyConfig: verifying default capture device...");

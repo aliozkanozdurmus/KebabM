@@ -1,5 +1,5 @@
 use keyring::Entry;
-use keyring::error::Error;
+use keyring::Error;
 
 const SERVICE: &str = "zaiqoM";
 const PREVIOUS_SERVICE: &str = concat!("Zai", "qo");
@@ -9,8 +9,43 @@ fn entry(service: &str, provider: &str) -> Result<Entry, String> {
     Entry::new(service, provider).map_err(|e| e.to_string())
 }
 
+/// Query metadata only: status badges must never decrypt the password.
+#[cfg(target_os = "macos")]
+pub fn exists(provider: &str) -> Result<bool, String> {
+    use security_framework::{
+        item::{ItemClass, ItemSearchOptions},
+        os::macos::keychain::{SecKeychain, SecPreferencesDomain},
+    };
+    if provider.is_empty() {
+        return Err("Credential provider must not be empty".into());
+    }
+    let keychain = SecKeychain::default_for_domain(SecPreferencesDomain::User)
+        .map_err(|e| e.to_string())?;
+    for service in [SERVICE, PREVIOUS_SERVICE, LEGACY_SERVICE] {
+        match ItemSearchOptions::new()
+            .keychains(std::slice::from_ref(&keychain))
+            .class(ItemClass::generic_password())
+            .service(service)
+            .account(provider)
+            .load_attributes(true)
+            .load_data(false)
+            .skip_authenticated_items(true)
+            .limit(1)
+            .search()
+        {
+            Ok(items) if !items.is_empty() => return Ok(true),
+            Ok(_) => {}
+            Err(e) if e.code() == -25300 => {} // errSecItemNotFound
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Ok(false)
+}
+
 pub fn write(provider: &str, key: &str) -> Result<(), String> {
-    entry(SERVICE, provider)?.set_password(key).map_err(|e| e.to_string())
+    entry(SERVICE, provider)?
+        .set_password(key)
+        .map_err(|e| e.to_string())
 }
 
 pub fn read(provider: &str) -> Result<Option<String>, String> {

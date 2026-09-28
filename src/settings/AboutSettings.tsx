@@ -1,16 +1,19 @@
+import { BrandMark } from "../components/BrandMark";
 import { useEffect, useState } from "react";
 import {
-  Github,
+  GitBranch,
   FileText,
   AlertCircle,
   HelpCircle,
 } from "lucide-react";
 import { NEXQ_VERSION, NEXQ_BUILD_DATE, NEXQ_DEVELOPER } from "../lib/version";
 import { open } from "@tauri-apps/plugin-shell";
+import { arch } from "@tauri-apps/plugin-os";
+import { useUpdaterStore } from "../stores/updaterStore";
 import { getPlatformCapabilities } from "../lib/ipc";
 import type { PlatformCapabilities } from "../lib/types";
 
-const GITHUB_URL = "https://github.com/VahidAlizadeh/NexQ";
+const GITHUB_URL = "https://github.com/aliozkanozdurmus/ZaiqoM-MeetingHelper";
 
 function formatBuildDate(dateStr: string): string {
   try {
@@ -26,6 +29,8 @@ function formatBuildDate(dateStr: string): string {
 }
 
 export function AboutSettings() {
+  const updateStatus = useUpdaterStore(s => s.checkStatus);
+  const architecture = (() => { try { return arch(); } catch { return "Unavailable"; } })();
   const [platform, setPlatform] = useState<PlatformCapabilities | null>(null);
 
   useEffect(() => {
@@ -46,14 +51,14 @@ export function AboutSettings() {
       {/* App Identity Card */}
       <div className="rounded-xl border border-border/30 bg-card/50 p-6">
         <div className="flex items-start gap-5">
-          <img src="/zaiqom-icon.png" alt="zaiqoM" className="h-14 w-14 shrink-0" />
+          <BrandMark className="h-16 w-16" />
           <div>
-            <h3 className="text-lg font-bold text-foreground">zaiqoM</h3>
+            <h3 className="text-lg font-bold text-foreground">ZaiqoM-MeetingHelper</h3>
             <p className="text-xs text-muted-foreground">
               v{NEXQ_VERSION}
             </p>
             <p className="mt-2 text-sm text-muted-foreground">
-              AI Meeting Assistant &amp; Real-Time Interview Copilot
+              Project knowledge and live meeting assistance
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center rounded-full bg-secondary/50 px-3 py-1 text-meta font-medium text-muted-foreground">
@@ -91,7 +96,7 @@ export function AboutSettings() {
         </div>
         <div className="rounded-xl border border-border/30 bg-card/50 p-4">
           <p className="text-meta text-muted-foreground/60">Architecture</p>
-          <p className="mt-1 text-sm font-medium text-foreground">x86_64</p>
+          <p className="mt-1 text-sm font-medium text-foreground">{architecture}</p>
         </div>
         <div className="rounded-xl border border-border/30 bg-card/50 p-4">
           <p className="text-meta text-muted-foreground/60">Copyright</p>
@@ -105,7 +110,7 @@ export function AboutSettings() {
           onClick={() => open(GITHUB_URL)}
           className="flex flex-col items-center gap-2 rounded-xl border border-border/30 bg-card/50 p-4 transition-colors hover:bg-secondary/30"
         >
-          <Github className="h-4 w-4 text-muted-foreground" />
+          <GitBranch className="h-4 w-4 text-muted-foreground" />
           <span className="text-meta font-medium text-muted-foreground">
             GitHub
           </span>
@@ -139,10 +144,13 @@ export function AboutSettings() {
         </button>
       </div>
 
+      <p className="text-xs text-muted-foreground" role="status">
+        {updateStatus === "disabled" ? "Signed updates are not configured for this build." : updateStatus === "error" ? "The update service could not be reached." : updateStatus === "available" ? "A signed update is available." : updateStatus === "up-to-date" ? "No newer update is available on the configured channel." : "Update channel status is being checked."}
+      </p>
       {/* Footer */}
       <div className="rounded-xl border border-border/30 bg-card/50 p-5">
         <p className="text-xs text-muted-foreground/60 leading-relaxed">
-          zaiqoM is an open desktop application. All processing can run locally
+          ZaiqoM-MeetingHelper is a desktop application. All processing can run locally
           with Ollama or LM Studio, or optionally connect to cloud AI providers.
         </p>
       </div>

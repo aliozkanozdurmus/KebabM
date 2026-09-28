@@ -1,3 +1,4 @@
+import { readingColor } from "../lib/readingColor";
 // Sub-PRD 4 / Task 13: Individual transcript line component
 // Displays timestamp, speaker label, and text for a single transcript segment.
 // Speaker color is dynamic via speakerStore; confidence underline when enabled.
@@ -286,7 +287,7 @@ export function TranscriptLine({ segment, searchQuery }: TranscriptLineProps) {
               ? "border-b border-dotted border-white/30 opacity-70"
               : ""
           }`}
-          style={{ fontSize: `${transcriptFontSize}px`, color: segment.is_final ? transcriptTextColor : undefined }}
+          style={{ fontSize: `${transcriptFontSize}px`, color: segment.is_final ? readingColor(transcriptTextColor, "transcript") : undefined }}
           title={
             isLowConfidence
               ? `Confidence: ${Math.round(segment.confidence * 100)}%`
@@ -298,7 +299,7 @@ export function TranscriptLine({ segment, searchQuery }: TranscriptLineProps) {
 
         {/* Inline translation — visible below the original text */}
         {displayMode === "inline" && (
-          <div className="mt-1 leading-[1.5]" style={{ fontSize: `${translationFontSize}px`, color: translationTextColor }}>
+          <div className="mt-1 leading-[1.5]" style={{ fontSize: `${translationFontSize}px`, color: readingColor(translationTextColor, "translation") }}>
             {isTranslating ? (
               <span className="text-muted-foreground/40 animate-pulse">Translating...</span>
             ) : translation ? (
@@ -317,7 +318,7 @@ export function TranscriptLine({ segment, searchQuery }: TranscriptLineProps) {
               top: `${Math.max(8, mousePos.y - 90)}px`,
             }}
           >
-            <p style={{ fontSize: `${translationFontSize + 1}px`, color: translationTextColor }} className="leading-[1.6]">
+            <p style={{ fontSize: `${translationFontSize + 1}px`, color: readingColor(translationTextColor, "translation") }} className="leading-[1.6]">
               {translation.translated_text}
             </p>
             <div className="mt-1.5 flex items-center gap-1.5 text-[0.6rem] text-muted-foreground/50">

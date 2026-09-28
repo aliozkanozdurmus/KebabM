@@ -1,3 +1,4 @@
+import { BrandMark } from "../BrandMark";
 import { useState, useCallback } from "react";
 import { useConfigStore } from "../../stores/configStore";
 import { useMeetingStore } from "../../stores/meetingStore";
@@ -117,8 +118,9 @@ export function FirstRunWizard() {
       {/* Header with progress */}
       <header className="flex items-center justify-between border-b border-border/20 px-8 py-4">
         <div className="flex items-center gap-2.5">
+          <BrandMark decorative />
           <span className="text-base font-bold tracking-tight text-foreground">
-            zaiqoM
+            ZaiqoM-MeetingHelper
           </span>
           <span className="text-sm text-muted-foreground/60 font-medium">
             Setup

@@ -3,7 +3,6 @@
 use futures::StreamExt;
 use serde_json::json;
 use std::time::Instant;
-use tauri::Emitter;
 
 use super::provider::{
     CompletionStats, GenerationParams, LLMError, LLMMessage, LLMProvider, ModelInfo,
@@ -69,11 +68,11 @@ impl LLMProvider for GeminiClient {
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, LLMError> {
         let url = format!(
-            "{}/v1beta/models?key={}",
-            self.base_url, self.api_key
+            "{}/v1beta/models",
+            self.base_url
         );
 
-        let response = self.client.get(&url).send().await?;
+        let response = self.client.get(&url).header("x-goog-api-key", &self.api_key).send().await?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -132,6 +131,7 @@ impl LLMProvider for GeminiClient {
                             .and_then(|c| c.as_u64());
 
                         Some(ModelInfo {
+                            max_output_tokens: None, capabilities: None,
                             id,
                             name: display_name,
                             provider: "gemini".to_string(),
@@ -157,11 +157,11 @@ impl LLMProvider for GeminiClient {
         messages: Vec<LLMMessage>,
         model: &str,
         params: GenerationParams,
-        app_handle: tauri::AppHandle,
+        app_handle: super::request::ResponseSink,
     ) -> Result<CompletionStats, LLMError> {
         let url = format!(
-            "{}/v1beta/models/{}:streamGenerateContent?key={}&alt=sse",
-            self.base_url, model, self.api_key
+            "{}/v1beta/models/{}:streamGenerateContent?alt=sse",
+            self.base_url, model
         );
         let start = Instant::now();
 
@@ -206,6 +206,7 @@ impl LLMProvider for GeminiClient {
         let response = self
             .client
             .post(&url)
+            .header("x-goog-api-key", &self.api_key)
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -240,8 +241,7 @@ impl LLMProvider for GeminiClient {
                 LLMError::HttpError(e)
             })?;
 
-            let chunk_str = String::from_utf8_lossy(&chunk);
-            let lines = line_buffer.push(&chunk_str);
+            let lines = line_buffer.push_bytes(&chunk);
 
             for line in lines {
                 let events = SSEParser::parse_chunk(&line);
@@ -340,5 +340,36 @@ impl LLMProvider for GeminiClient {
         );
 
         Ok(stats)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn catalog_authentication_stays_out_of_request_url() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut bytes = [0u8; 2048];
+            while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                let count = socket.read(&mut bytes).await.unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&bytes[..count]);
+            }
+            let request = String::from_utf8(request).unwrap();
+            assert_eq!(request.lines().next().unwrap(), "GET /v1beta/models HTTP/1.1");
+            assert!(request.to_ascii_lowercase().contains("x-goog-api-key: aq.synthetic-test-credential"));
+            let body = r#"{"models":[{"name":"models/fixture","supportedGenerationMethods":["generateContent"]}]}"#;
+            socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).as_bytes()).await.unwrap();
+        });
+        let client = GeminiClient::new("AQ.synthetic-test-credential", Some(&format!("http://{address}")));
+        let models = client.list_models().await.unwrap();
+        assert_eq!(models.len(), 1);
+        server.await.unwrap();
     }
 }

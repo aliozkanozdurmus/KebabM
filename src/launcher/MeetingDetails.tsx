@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Meeting, AIInteraction, TranscriptSegment } from "../lib/types";
+import { costScope, estimateAnswerCost } from "../lib/usage";
 import { getMeeting } from "../lib/ipc";
 import { onTranscriptFinal } from "../lib/events";
 import { useMeetingStore } from "../stores/meetingStore";
@@ -98,6 +99,8 @@ export function MeetingDetails({ meetingId, onBack }: MeetingDetailsProps) {
     ? formatDurationLong(meeting.duration_seconds * 1000)
     : "In progress";
 
+  const costs = meeting.ai_interactions.map(i => estimateAnswerCost(i.provider, i.model, i.prompt_tokens, i.completion_tokens)).filter((n): n is number => n != null);
+  const tokens = meeting.ai_interactions.reduce((n, i) => n + (i.total_tokens ?? 0), 0);
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
@@ -123,6 +126,7 @@ export function MeetingDetails({ meetingId, onBack }: MeetingDetailsProps) {
         </div>
       </div>
 
+      <p className="px-6 py-2 text-xs text-muted-foreground" title={costScope}>{tokens} recorded answer tokens · {costs.length ? `~$${costs.reduce((a, b) => a + b, 0).toFixed(4)} text cost for ${costs.length}/${meeting.ai_interactions.length} answers` : "Cost unavailable for this model or older records"}. Excludes other AI/audio services.</p>
       {/* Tab bar */}
       <div className="flex gap-1.5 border-b border-border/20 px-6 py-2.5" role="tablist">
         <TabButton

@@ -263,6 +263,10 @@ impl ContextManager {
         self.resources.clone()
     }
 
+    pub fn resource_text(&self, id: &str) -> Option<String> {
+        self.cache.get(id).map(|r|r.text.clone())
+    }
+
     /// Get the assembled context text (concatenation of all resources' text).
     pub fn get_assembled_context(&self) -> String {
         let mut parts: Vec<String> = Vec::new();

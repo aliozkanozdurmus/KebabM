@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/schema.json",
-  "productName": "zaiqoM",
+  "productName": "ZaiqoM-MeetingHelper",
   "version": "1.0.0",
   "identifier": "com.nexq.app",
   "build": {
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "launcher",
-        "title": "zaiqoM",
+        "title": "ZaiqoM-MeetingHelper",
         "width": 900,
         "height": 650,
         "minWidth": 700,
@@ -26,7 +26,7 @@
       },
       {
         "label": "overlay",
-        "title": "zaiqoM",
+        "title": "ZaiqoM-MeetingHelper",
         "width": 500,
         "height": 700,
         "minWidth": 400,
@@ -45,22 +45,32 @@
       "id": "main",
       "iconPath": "icons/icon.png",
       "iconAsTemplate": false,
-      "tooltip": "zaiqoM",
+      "tooltip": "ZaiqoM-MeetingHelper",
       "menuOnLeftClick": false
     },
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; font-src 'self' data:; media-src 'self' asset: http://asset.localhost blob:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; frame-src 'none'",
+      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' asset: http://asset.localhost data: blob:; font-src 'self' data:; media-src 'self' asset: http://asset.localhost blob:; connect-src ipc: http://ipc.localhost http://localhost:5173 ws://localhost:5173; object-src 'none'; base-uri 'self'; frame-src 'none'"
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "targets": [
+      "app",
+      "dmg",
+      "nsis"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "infoPlist": "Info.plist"
+    }
   },
   "plugins": {}
 }

@@ -46,38 +46,26 @@ interface TabGroup {
 }
 
 const TAB_GROUPS: TabGroup[] = [
-  {
-    label: "Meeting",
-    items: [
-      { id: "meeting_audio", label: "Audio & Devices", icon: <Headphones className="h-4 w-4" /> },
-    ],
-  },
-  {
-    label: "Providers",
-    items: [
-      { id: "llm", label: "LLM Providers", icon: <Brain className="h-4 w-4" /> },
-      { id: "stt", label: "STT Providers", icon: <Mic className="h-4 w-4" /> },
-      { id: "translation", label: "Translation", icon: <Globe className="h-4 w-4" /> },
-    ],
-  },
-  {
-    label: "Intelligence",
-    items: [
-      { id: "ai_actions", label: "AI Actions", icon: <Sparkles className="h-4 w-4" /> },
-      { id: "context_strategy", label: "Context Strategy", icon: <Database className="h-4 w-4" /> },
-      { id: "scenarios", label: "AI Scenarios", icon: <Theater className="h-4 w-4" /> },
-      { id: "noise_presets", label: "Noise Presets", icon: <Volume2 className="h-4 w-4" /> },
-      { id: "confidence", label: "Confidence", icon: <BarChart2 className="h-4 w-4" /> },
-    ],
-  },
-  {
-    label: "System",
-    items: [
-      { id: "hotkeys", label: "Hotkeys", icon: <Keyboard className="h-4 w-4" /> },
-      { id: "general", label: "General", icon: <SlidersHorizontal className="h-4 w-4" /> },
-      { id: "about", label: "About", icon: <Info className="h-4 w-4" /> },
-    ],
-  },
+  { label: "Audio & languages", items: [
+    { id: "meeting_audio", label: "Audio & devices", icon: <Headphones className="h-4 w-4" /> },
+    { id: "stt", label: "Speech recognition", icon: <Mic className="h-4 w-4" /> },
+    { id: "translation", label: "Translation", icon: <Globe className="h-4 w-4" /> },
+  ] },
+  { label: "AI & knowledge", items: [
+    { id: "llm", label: "Providers & models", icon: <Brain className="h-4 w-4" /> },
+    { id: "context_strategy", label: "Knowledge & search", icon: <Database className="h-4 w-4" /> },
+    { id: "ai_actions", label: "Answer actions", icon: <Sparkles className="h-4 w-4" /> },
+    { id: "scenarios", label: "Scenarios", icon: <Theater className="h-4 w-4" /> },
+  ] },
+  { label: "Appearance & shortcuts", items: [
+    { id: "general", label: "Appearance & behavior", icon: <SlidersHorizontal className="h-4 w-4" /> },
+    { id: "hotkeys", label: "Keyboard shortcuts", icon: <Keyboard className="h-4 w-4" /> },
+  ] },
+  { label: "Advanced", items: [
+    { id: "noise_presets", label: "Noise presets", icon: <Volume2 className="h-4 w-4" /> },
+    { id: "confidence", label: "Speech thresholds", icon: <BarChart2 className="h-4 w-4" /> },
+    { id: "about", label: "About & updates", icon: <Info className="h-4 w-4" /> },
+  ] },
 ];
 
 // Flat list for modal tabs (same order)
@@ -185,7 +173,7 @@ export function SettingsOverlay({ isModal = false }: SettingsOverlayProps) {
   const currentTabLabel = TAB_LABELS[activeTab] ?? "Settings";
 
   // Wider content area for two-column settings pages
-  const contentMaxW = activeTab === "ai_actions" || activeTab === "translation" ? "max-w-4xl" : "max-w-2xl";
+  const contentMaxW = activeTab === "general" || activeTab === "ai_actions" || activeTab === "translation" ? "max-w-4xl" : "max-w-2xl";
 
   // ─── Modal mode: render as overlay dialog ───
   if (isModal) {
@@ -201,7 +189,7 @@ export function SettingsOverlay({ isModal = false }: SettingsOverlayProps) {
           role="dialog"
           aria-modal="true"
           aria-label="Settings"
-          className={`flex max-h-[520px] w-[640px] flex-col border border-border bg-background shadow-2xl transition-opacity duration-150 ${
+          className={`app-surface flex max-h-[85vh] w-[640px] max-w-[calc(100vw-16px)] flex-col border border-border bg-background shadow-2xl transition-opacity duration-150 ${
             isVisible
               ? "opacity-100 scale-100 translate-y-0"
               : "opacity-0 scale-[0.97] translate-y-3"
@@ -209,7 +197,7 @@ export function SettingsOverlay({ isModal = false }: SettingsOverlayProps) {
           style={{ transitionTimingFunction: "cubic-bezier(0.22, 1, 0.36, 1)" }}
         >
           {/* Header */}
-          <div className="flex h-12 items-center justify-between border-b border-border bg-card px-4">
+          <div className="glass-surface flex h-12 shrink-0 items-center justify-between border-b border-border bg-card px-4">
             <h2 className="text-sm font-normal text-foreground">Settings</h2>
             <div className="flex items-center gap-1">
               <button
@@ -266,9 +254,9 @@ export function SettingsOverlay({ isModal = false }: SettingsOverlayProps) {
 
   // ─── Full-page mode: sidebar + content ───
   return (
-    <div className="flex h-full w-full bg-background">
+    <div className="app-surface flex h-full w-full flex-col sm:flex-row bg-background">
       {/* Sidebar */}
-      <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-card">
+      <aside className="glass-surface flex w-full sm:w-56 shrink-0 flex-col border-b sm:border-b-0 sm:border-r border-border bg-card">
         {/* Back Button */}
         <div className="flex items-center gap-3 border-b border-border/20 px-4 py-4">
           <button
@@ -283,11 +271,11 @@ export function SettingsOverlay({ isModal = false }: SettingsOverlayProps) {
         </div>
 
         {/* Grouped Navigation */}
-        <nav className="flex-1 overflow-y-auto px-3 pt-3 pb-1" role="tablist" aria-label="Settings navigation">
+        <nav className="flex sm:block sm:flex-1 overflow-x-auto sm:overflow-y-auto px-3 pt-3 pb-1" role="tablist" aria-label="Settings navigation">
           {TAB_GROUPS.map((group, gi) => (
-            <div key={group.label} className={gi > 0 ? "mt-4" : ""}>
+            <div key={group.label} className={`shrink-0 ${gi > 0 ? "sm:mt-4" : ""}`}>
               {/* Group label */}
-              <div className="mb-1 px-3 flex items-center gap-2">
+              <div className="mb-1 px-3 hidden sm:flex items-center gap-2">
                 <span className="text-meta font-semibold uppercase tracking-wider text-muted-foreground/70">
                   {group.label}
                 </span>
@@ -295,7 +283,7 @@ export function SettingsOverlay({ isModal = false }: SettingsOverlayProps) {
               </div>
 
               {/* Group items */}
-              <div className="space-y-0.5">
+              <div className="flex sm:block sm:space-y-0.5">
                 {group.items.map((tab) => {
                   const isActive = activeTab === tab.id;
                   return (
@@ -304,7 +292,7 @@ export function SettingsOverlay({ isModal = false }: SettingsOverlayProps) {
                       role="tab"
                       aria-selected={isActive}
                       onClick={() => setActiveTab(tab.id)}
-                      className={`group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 cursor-pointer ${
+                      className={`group relative flex w-full items-center whitespace-nowrap sm:whitespace-normal gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-150 cursor-pointer ${
                         isActive
                           ? "bg-primary/10 text-primary"
                           : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
@@ -329,7 +317,7 @@ export function SettingsOverlay({ isModal = false }: SettingsOverlayProps) {
         </nav>
 
         {/* Bottom: Wizard re-run */}
-        <div className="border-t border-border/20 px-3 py-3">
+        <div className="hidden sm:block border-t border-border/20 px-3 py-3">
           <button
             onClick={handleRunWizard}
             className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground cursor-pointer"
@@ -343,8 +331,8 @@ export function SettingsOverlay({ isModal = false }: SettingsOverlayProps) {
       </aside>
 
       {/* Content Area */}
-      <main className="flex-1 overflow-y-auto" role="tabpanel">
-        <div className={`mx-auto ${contentMaxW} px-8 py-8`}>
+      <main className="min-h-0 min-w-0 flex-1 overflow-y-auto" role="tabpanel">
+        <div className={`mx-auto ${contentMaxW} px-4 py-6 lg:px-8 lg:py-8`}>
           {/* Section Heading */}
           <div className="mb-8">
             <h1 className="text-xl font-semibold text-foreground">{currentTabLabel}</h1>

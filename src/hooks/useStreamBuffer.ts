@@ -4,6 +4,7 @@
 import { useEffect, useRef } from "react";
 import { useStreamStore } from "../stores/streamStore";
 import {
+  onAssistEvent,
   onStreamStart,
   onStreamToken,
   onStreamEnd,
@@ -47,6 +48,10 @@ export function useStreamBuffer() {
       }
     };
 
+    unlisteners.push(onAssistEvent(event => {
+      useStreamStore.setState({ isStreaming: true, requestId: event.requestId, sessionId: event.sessionId, phase: event.status === "generating" ? "generating" : "searching", error: null, ...(event.status === "detected" ? { currentQuestion: event.question, currentMode: event.mode ?? "Assist" } : {}) });
+    }));
+
     // Subscribe to stream start
     unlisteners.push(
       onStreamStart((event) => {
@@ -58,7 +63,8 @@ export function useStreamBuffer() {
         startStream(
           event.mode as IntelligenceMode,
           event.model,
-          event.provider
+          event.provider,
+          event
         );
       })
     );
@@ -83,7 +89,7 @@ export function useStreamBuffer() {
           cancelAnimationFrame(rafId.current);
           rafId.current = null;
         }
-        endStream(event.latency_ms);
+        endStream(event.latency_ms, event.total_tokens, event.prompt_tokens, event.completion_tokens);
       })
     );
 

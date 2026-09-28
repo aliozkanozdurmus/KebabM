@@ -1,10 +1,9 @@
-import { copyFileSync } from "node:fs";
+import { copyFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const from = join(root, "src-tauri", "target", "release", "nexq.exe");
-const to = join(root, "zaiqoM.exe");
-
-copyFileSync(from, to);
-console.log(`zaiqoM.exe updated (${to})`);
+const name = process.platform === "win32" ? "nexq.exe" : "nexq";
+const out = join(root, "release-artifacts");
+mkdirSync(out, { recursive: true });
+copyFileSync(join(root, "src-tauri", "target", "release", name), join(out, name));
+console.log(`Standalone executable copied to ${out}`);

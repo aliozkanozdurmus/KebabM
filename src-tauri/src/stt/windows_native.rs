@@ -5,8 +5,8 @@
 //
 // Two modes:
 //   DirectMic   — SpeechRecognizer reads from the default mic device. feed_audio is a no-op.
-//   CustomStream — We push PCM chunks into a ring buffer for processing.
-//                  Used for loopback (system audio) transcription.
+//   CustomStream — Kept for saved configuration compatibility; rejected explicitly.
+//                  Windows Speech has no PCM input support in this adapter.
 //
 // The Windows.Media.SpeechRecognition API provides built-in speech recognition
 // that ships with Windows 10/11. No downloads needed if the language pack is installed.
@@ -14,6 +14,7 @@
 use async_trait::async_trait;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+#[cfg(target_os = "windows")]
 use std::time::Instant;
 use tokio::sync::mpsc;
 
@@ -25,8 +26,7 @@ use crate::stt::provider::{STTProvider, STTProviderType, TranscriptResult};
 pub enum SapiInputMode {
     /// SpeechRecognizer reads from the system default microphone directly.
     DirectMic,
-    /// We feed PCM chunks via a channel; processed via energy-based VAD
-    /// with real SAPI recognition when available.
+    /// Unsupported PCM input; callers must choose a provider with system-audio support.
     CustomStream,
 }
 
@@ -110,14 +110,7 @@ impl WindowsNativeSTT {
         }
     }
 
-    /// Calculate RMS energy of audio samples.
-    fn calculate_rms(samples: &[i16]) -> f32 {
-        if samples.is_empty() {
-            return 0.0;
-        }
-        let sum_sq: f64 = samples.iter().map(|&s| (s as f64) * (s as f64)).sum();
-        (sum_sq / samples.len() as f64).sqrt() as f32
-    }
+
 }
 
 #[async_trait]
@@ -134,6 +127,12 @@ impl STTProvider for WindowsNativeSTT {
         &mut self,
         result_tx: mpsc::Sender<TranscriptResult>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if self.input_mode == SapiInputMode::CustomStream {
+            return Err("Windows Speech cannot transcribe system audio. Select Deepgram, Whisper, or another PCM-capable provider for this side.".into());
+        }
+        if !cfg!(target_os = "windows") {
+            return Err("Windows Speech is available only on Windows.".into());
+        }
         if self.is_streaming {
             return Err("Stream already active".into());
         }
@@ -230,6 +229,9 @@ impl STTProvider for WindowsNativeSTT {
     }
 
     async fn test_connection(&self) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        if self.input_mode == SapiInputMode::CustomStream {
+            return Err("Windows Speech cannot transcribe system audio. Choose a PCM-capable provider.".into());
+        }
         #[cfg(target_os = "windows")]
         {
             // Check if SpeechRecognizer is available
@@ -285,8 +287,8 @@ fn check_speech_recognizer_available(language: &str) -> bool {
                 &HSTRING::from("freeform"),
             )?;
             recognizer.Constraints()?.Append(&constraint)?;
-            recognizer.CompileConstraintsAsync()?.get()?;
-            Ok(true)
+            let result = recognizer.CompileConstraintsAsync()?.join()?;
+            Ok(result.Status()? == windows::Media::SpeechRecognition::SpeechRecognitionResultStatus::Success)
         })().unwrap_or(false);
 
         CoUninitialize();
@@ -306,7 +308,7 @@ pub fn language_available(language: &str) -> bool {
     std::thread::spawn(move || {
         let _ = tx.send(check_speech_recognizer_available(&language));
     });
-    rx.recv_timeout(std::time::Duration::from_secs(4)).unwrap_or(true)
+    rx.recv_timeout(std::time::Duration::from_secs(4)).unwrap_or(false)
 }
 
 /// Emit a status event from the recognition thread.
@@ -334,16 +336,18 @@ fn emit_thread_status(app_handle: &Option<tauri::AppHandle>, party: &str, status
 /// Main function running on the dedicated recognition thread.
 ///
 /// On Windows, attempts to use Windows.Media.SpeechRecognition API.
-/// Falls back to energy-based speech detection if the API is unavailable.
+/// Failure stays visible; speech activity must never be presented as a transcript.
 fn recognition_thread_main(
     stop_flag: Arc<AtomicBool>,
     language: String,
     input_mode: SapiInputMode,
-    audio_rx: std::sync::mpsc::Receiver<Vec<i16>>,
+    _audio_rx: std::sync::mpsc::Receiver<Vec<i16>>,
     result_tx: mpsc::Sender<TranscriptResult>,
     app_handle: Option<tauri::AppHandle>,
     party: String,
 ) {
+    #[cfg(not(target_os = "windows"))]
+    let _ = (&language, &stop_flag, &result_tx);
     log::info!("Recognition thread started (mode: {:?})", input_mode);
 
     #[cfg(target_os = "windows")]
@@ -357,13 +361,11 @@ fn recognition_thread_main(
             }
             // Don't emit another generic error here — run_windows_speech_recognizer
             // already emits specific errors at each failure point.
-            log::warn!("WindowsNativeSTT: Windows Speech Recognizer unavailable, falling back to energy detection");
+            log::warn!("WindowsNativeSTT: Windows Speech Recognizer unavailable");
         }
     }
 
-    // CustomStream mode or fallback: use energy-based detection
-    emit_thread_status(&app_handle, &party, "connected", Some("Energy-based detection active".to_string()));
-    energy_detection_with_accumulation(stop_flag, input_mode, audio_rx, result_tx);
+    emit_thread_status(&app_handle, &party, "error", Some("Windows Speech did not start. Check the speech language pack or select another transcription provider.".to_string()));
 }
 
 /// Run the Windows.Media.SpeechRecognition continuous recognizer (DirectMic mode only).
@@ -437,7 +439,7 @@ fn run_windows_speech_recognizer(
             }
             // Compile — mandatory before StartAsync
             match recognizer.CompileConstraintsAsync() {
-                Ok(op) => match op.get() {
+                Ok(op) => match op.join() {
                     Ok(compile_result) => {
                         // CRITICAL: Check the actual compilation status, not just Ok/Err.
                         // A non-Success status means the recognizer will silently produce
@@ -531,7 +533,7 @@ fn run_windows_speech_recognizer(
         SpeechRecognizer,
         SpeechRecognitionHypothesisGeneratedEventArgs,
     >::new(move |_recognizer, args| {
-        if let Some(args) = args {
+        if let Some(args) = args.as_ref() {
             if let Ok(hypothesis) = args.Hypothesis() {
                 if let Ok(text) = hypothesis.Text() {
                     let text_str = text.to_string();
@@ -572,7 +574,7 @@ fn run_windows_speech_recognizer(
         SpeechContinuousRecognitionSession,
         SpeechContinuousRecognitionResultGeneratedEventArgs,
     >::new(move |_session, args| {
-        if let Some(args) = args {
+        if let Some(args) = args.as_ref() {
             if let Ok(result) = args.Result() {
                 if let Ok(text) = result.Text() {
                     let text_str = text.to_string();
@@ -629,7 +631,7 @@ fn run_windows_speech_recognizer(
         SpeechContinuousRecognitionSession,
         SpeechContinuousRecognitionCompletedEventArgs,
     >::new(move |_session, args| {
-        if let Some(args) = args {
+        if let Some(args) = args.as_ref() {
             if let Ok(status) = args.Status() {
                 let status_name = match status {
                     SpeechRecognitionResultStatus::Success => "Success",
@@ -675,7 +677,7 @@ fn run_windows_speech_recognizer(
 
     // Start continuous recognition
     let start_err = match session.StartAsync() {
-        Ok(op) => match op.get() {
+        Ok(op) => match op.join() {
             Ok(_) => None,
             Err(e) => Some(e),
         },
@@ -729,11 +731,11 @@ fn run_windows_speech_recognizer(
             // 0x80131509 (InvalidOperationException). StopAsync transitions it back to
             // a startable state.
             if let Ok(stop_op) = session.StopAsync() {
-                let _ = stop_op.get();
+                let _ = stop_op.join();
             }
 
             match session.StartAsync() {
-                Ok(op) => match op.get() {
+                Ok(op) => match op.join() {
                     Ok(_) => {
                         log::info!("WindowsNativeSTT: Session restarted successfully");
                         // Don't spam status updates — only show on first restart
@@ -783,113 +785,36 @@ fn run_windows_speech_recognizer(
 
     // Stop recognition
     if let Ok(op) = session.StopAsync() {
-        let _ = op.get();
+        let _ = op.join();
     }
 
     unsafe { windows::Win32::System::Com::CoUninitialize(); }
     true
 }
 
-/// Enhanced energy-based speech detection with audio accumulation.
-/// Detects speech boundaries and emits transcript events with timing info.
-/// This serves as the primary recognizer for CustomStream mode and as a
-/// fallback for DirectMic mode when the Windows Speech API is unavailable.
-fn energy_detection_with_accumulation(
-    stop_flag: Arc<AtomicBool>,
-    input_mode: SapiInputMode,
-    audio_rx: std::sync::mpsc::Receiver<Vec<i16>>,
-    result_tx: mpsc::Sender<TranscriptResult>,
-) {
-    log::info!("WindowsNativeSTT: Running energy-based detection");
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    let mut speech_frame_count: u32 = 0;
-    let mut silence_frame_count: u32 = 0;
-    let mut utterance_active = false;
-    let mut segment_counter: u64 = 0;
-    let start_time = Instant::now();
-    let mut utterance_start_ms: u64 = 0;
-    let mut utterance_samples: Vec<i16> = Vec::new();
-
-    // For DirectMic mode, we won't receive audio — just sleep and check stop flag.
-    if input_mode == SapiInputMode::DirectMic {
-        while !stop_flag.load(Ordering::SeqCst) {
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        return;
+    #[tokio::test]
+    async fn unsupported_system_audio_never_reports_a_working_transcriber() {
+        let mut provider = WindowsNativeSTT::for_custom_stream();
+        let (tx, mut rx) = mpsc::channel(2);
+        assert!(provider.test_connection().await.is_err());
+        let error = provider.start_stream(tx).await.unwrap_err();
+        assert!(error.to_string().contains("system audio"));
+        assert!(!provider.is_streaming);
+        assert!(provider.recognizer_thread.is_none());
+        assert!(rx.try_recv().is_err());
     }
 
-    // CustomStream mode: process incoming PCM chunks
-    while !stop_flag.load(Ordering::SeqCst) {
-        match audio_rx.recv_timeout(std::time::Duration::from_millis(100)) {
-            Ok(pcm_data) => {
-                let rms = WindowsNativeSTT::calculate_rms(&pcm_data);
-                let has_speech = rms > 500.0;
-
-                if has_speech {
-                    speech_frame_count += 1;
-                    silence_frame_count = 0;
-
-                    if !utterance_active && speech_frame_count >= 5 {
-                        utterance_active = true;
-                        utterance_start_ms = start_time.elapsed().as_millis() as u64;
-                        utterance_samples.clear();
-                        log::debug!("WindowsNativeSTT: Speech started");
-                    }
-
-                    if utterance_active {
-                        utterance_samples.extend_from_slice(&pcm_data);
-
-                        // Emit interim result for long utterances (every ~2s of speech)
-                        if utterance_samples.len() > 32000 * 2 {
-                            segment_counter += 1;
-                            let duration_s = utterance_samples.len() as f32 / 16000.0;
-                            let _ = result_tx.blocking_send(TranscriptResult {
-                                text: format!("[speech: {:.1}s]", duration_s),
-                                is_final: false,
-                                confidence: 0.0,
-                                timestamp_ms: utterance_start_ms,
-                                speaker: None,
-                                language: None,
-                                segment_id: Some(format!("win_{}", segment_counter)),
-                            });
-                        }
-                    }
-                } else {
-                    silence_frame_count += 1;
-
-                    if utterance_active && silence_frame_count > 15 {
-                        // Utterance ended
-                        let duration_s = utterance_samples.len() as f32 / 16000.0;
-                        segment_counter += 1;
-
-                        log::debug!(
-                            "WindowsNativeSTT: Speech ended (~{:.1}s of audio)",
-                            duration_s
-                        );
-
-                        // Emit final result with duration info
-                        // Real transcription requires a cloud STT or the Windows Speech API.
-                        // This fallback only provides VAD boundaries.
-                        let _ = result_tx.blocking_send(TranscriptResult {
-                            text: format!("[speech detected: {:.1}s]", duration_s),
-                            is_final: true,
-                            confidence: 0.0,
-                            timestamp_ms: utterance_start_ms,
-                            speaker: None,
-                            language: None,
-                            segment_id: Some(format!("win_{}", segment_counter)),
-                        });
-
-                        utterance_active = false;
-                        speech_frame_count = 0;
-                        utterance_samples.clear();
-                    }
-                }
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-        }
+    #[cfg(not(target_os = "windows"))]
+    #[tokio::test]
+    async fn windows_speech_cannot_start_on_another_platform() {
+        let mut provider = WindowsNativeSTT::for_mic();
+        let (tx, _) = mpsc::channel(2);
+        assert!(provider.start_stream(tx).await.is_err());
+        assert!(!provider.is_streaming);
+        assert!(!provider.test_connection().await.unwrap());
     }
-
-    log::info!("WindowsNativeSTT: Recognition thread exiting");
 }

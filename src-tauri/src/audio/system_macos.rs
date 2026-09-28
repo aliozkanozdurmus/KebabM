@@ -11,7 +11,7 @@ use super::AudioChunk;
 const RATE: u32 = 48_000;
 
 struct AudioHandler {
-    sender: std::sync::mpsc::Sender<Vec<i16>>,
+    sender: std::sync::mpsc::SyncSender<Vec<i16>>,
 }
 
 impl SCStreamOutputTrait for AudioHandler {
@@ -19,24 +19,22 @@ impl SCStreamOutputTrait for AudioHandler {
         if output_type != SCStreamOutputType::Audio {
             return;
         }
-        let Some(list) = sample.audio_buffer_list() else {
+        let Ok(list) = sample.audio_buffer_list() else {
             return;
         };
-        let Some(buffer) = list.into_iter().next() else {
+        let Some(buffer) = list.iter().next() else {
             return;
         };
         let raw = buffer.data();
         if raw.len() < 4 {
             return;
         }
-        let frames = unsafe {
-            std::slice::from_raw_parts(raw.as_ptr() as *const f32, raw.len() / 4)
-        };
-        let pcm: Vec<i16> = frames
-            .iter()
-            .map(|s| (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)
+        // CoreAudio byte buffers need not be aligned as Rust f32 slices.
+        let pcm: Vec<i16> = raw.chunks_exact(4)
+            .map(|bytes| f32::from_ne_bytes(bytes.try_into().unwrap()))
+            .map(|value| (value.clamp(-1.0, 1.0) * 32768.0) as i16)
             .collect();
-        let _ = self.sender.send(pcm);
+        let _ = self.sender.try_send(pcm);
     }
 }
 
@@ -45,6 +43,7 @@ pub fn run(
     tx: mpsc::Sender<AudioChunk>,
     stop_flag: Arc<AtomicBool>,
     _device_name: Option<String>,
+    ready: &std::sync::mpsc::SyncSender<Result<(), String>>,
 ) -> Result<(), String> {
     let content = SCShareableContent::get().map_err(|e| {
         format!("ScreenCaptureKit needs screen recording permission: {e}")
@@ -58,7 +57,7 @@ pub fn run(
     let filter = SCContentFilter::create()
         .with_display(&display)
         .with_excluding_windows(&[])
-        .build();
+        .build().map_err(|e| format!("ScreenCaptureKit filter: {e}"))?;
     let config = SCStreamConfiguration::new()
         .with_width(2)
         .with_height(2)
@@ -67,12 +66,13 @@ pub fn run(
         .with_sample_rate(RATE as i32)
         .with_channel_count(1);
 
-    let (pcm_tx, pcm_rx) = std::sync::mpsc::channel();
-    let mut stream = SCStream::new(&filter, &config);
-    stream.add_output_handler(AudioHandler { sender: pcm_tx }, SCStreamOutputType::Audio);
+    let (pcm_tx, pcm_rx) = std::sync::mpsc::sync_channel(32);
+    let mut stream = SCStream::new(&filter, &config).map_err(|e| format!("ScreenCaptureKit stream: {e}"))?;
+    stream.add_output_handler(AudioHandler { sender: pcm_tx }, SCStreamOutputType::Audio).map_err(|e| format!("ScreenCaptureKit audio handler: {e}"))?;
     stream
         .start_capture()
         .map_err(|e| format!("ScreenCaptureKit start failed: {e}"))?;
+    let _ = ready.try_send(Ok(()));
     log::info!("macOS system audio capture active");
 
     while !stop_flag.load(Ordering::Relaxed) {

@@ -1,3 +1,4 @@
+import { AppearancePicker } from "./AppearancePicker";
 import { useCallback } from "react";
 import { useConfigStore } from "../stores/configStore";
 import { FolderOpen, Sun, Moon, Monitor } from "lucide-react";
@@ -39,13 +40,14 @@ export function GeneralSettings() {
 
   return (
     <div className="space-y-6">
+      <AppearancePicker />
       {/* Theme Toggle */}
       <div className="rounded-xl border border-border/30 bg-card/50 p-5">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <label className="text-sm font-medium text-foreground">Theme</label>
+            <label className="text-sm font-medium text-foreground">Color mode</label>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Light is a white window. Dark is gray. System follows Windows.
+              Light, dark, or follow your device. Independent of appearance.
             </p>
           </div>
           <div className="flex rounded-lg border border-border/50 bg-secondary/30 p-0.5">
@@ -53,6 +55,7 @@ export function GeneralSettings() {
               <button
                 key={opt.value}
                 onClick={() => setTheme(opt.value)}
+                aria-pressed={theme === opt.value}
                 className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all duration-150 cursor-pointer ${
                   theme === opt.value
                     ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20"
@@ -107,7 +110,7 @@ export function GeneralSettings() {
               Start on Login
             </label>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Launch zaiqoM automatically when you log in
+              Launch ZaiqoM-MeetingHelper automatically when you log in
             </p>
           </div>
           <button
@@ -177,7 +180,7 @@ export function GeneralSettings() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex-1 rounded-lg border border-border/50 bg-secondary/30 px-3.5 py-2.5">
+          <div className="min-w-0 flex-1 rounded-lg border border-border/50 bg-secondary/30 px-3.5 py-2.5">
             <p className="truncate text-xs text-muted-foreground">
               {dataDirectory || "Default app data directory"}
             </p>

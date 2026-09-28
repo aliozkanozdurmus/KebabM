@@ -217,8 +217,8 @@ export async function setActiveModel(
   return invoke("set_active_model", { provider, modelId });
 }
 
-export async function testLLMConnection(provider: string): Promise<boolean> {
-  return invoke("test_llm_connection", { provider });
+export async function testLLMConnection(provider: string, modelId?: string): Promise<boolean> {
+  return invoke("test_llm_connection", { provider, modelId });
 }
 
 export async function getLLMProviders(): Promise<string[]> {
@@ -241,23 +241,39 @@ export async function setAiReplyLanguage(language: string): Promise<void> {
   return invoke("set_ai_reply_language", { language });
 }
 
-export async function generateAssist(mode: string, customQuestion?: string): Promise<void> {
-  // Universal transcript: gather all final segments from the frontend store
-  // (the single source of truth — every STT engine feeds into it).
-  // The backend applies the per-action transcript window setting.
+export async function generateAssist(mode: string, customQuestion?: string, sourceEvidence?: import("./types").EvidenceRef[]): Promise<void> {
+  // Standalone fallback only. Active meetings use Rust's durable transcript.
   const { useTranscriptStore } = await import("../stores/transcriptStore");
   const segments = useTranscriptStore.getState().segments
     .filter(s => s.is_final)
     .map(s => ({ text: s.text, speaker: s.speaker, timestamp_ms: s.timestamp_ms }));
 
-  return invoke("generate_assist", {
-    mode,
-    customQuestion,
-    transcriptSegments: JSON.stringify(segments),
-  });
+  const { useStreamStore } = await import("../stores/streamStore");
+  const { useMeetingStore } = await import("../stores/meetingStore");
+  const { beginStreamRequest, isStreamRequestCurrent, closeStreamRequest } = await import("./events");
+  if (useStreamStore.getState().isStreaming) throw new Error("An answer is already being prepared.");
+  const requestId = crypto.randomUUID();
+  beginStreamRequest(requestId);
+  useStreamStore.setState({ isStreaming: true, error: null, requestId, currentQuestion: customQuestion, currentMode: mode as import("./types").IntelligenceMode, currentEvidence: sourceEvidence ?? [] });
+  try {
+    await invoke("generate_assist", {
+      mode, customQuestion, requestId, sourceEvidence,
+      sessionId: useMeetingStore.getState().activeMeeting?.id ?? "standalone",
+      questionId: customQuestion ? requestId : undefined,
+      transcriptSegments: JSON.stringify(segments),
+    });
+  } catch (error) {
+    if (isStreamRequestCurrent(requestId)) { closeStreamRequest(); useStreamStore.getState().setError(String(error)); }
+    throw error;
+  }
+
 }
 
 export async function cancelGeneration(): Promise<void> {
+  const { closeStreamRequest } = await import("./events");
+  const { useStreamStore } = await import("../stores/streamStore");
+  closeStreamRequest();
+  useStreamStore.getState().setError("Answer cancelled.");
   return invoke("cancel_generation");
 }
 
@@ -273,9 +289,11 @@ export async function pushTranscript(
   text: string,
   speaker: string,
   timestampMs: number,
-  isFinal: boolean
+  isFinal: boolean,
+  sessionId?: string,
+  segmentId?: string
 ): Promise<void> {
-  return invoke("push_transcript", { text, speaker, timestampMs, isFinal });
+  return invoke("push_transcript", { text, speaker, timestampMs, isFinal, sessionId, segmentId });
 }
 
 // == IPC: Action Configs ==
@@ -610,7 +628,7 @@ export async function testRagAnswer(
   query: string,
   llmProvider?: string,
   llmModel?: string
-): Promise<void> {
+): Promise<{ text: string; model: string; provider: string; stats: { latency_ms: number; total_tokens: number } }> {
   return invoke("test_rag_answer", { query, llmProvider, llmModel });
 }
 
@@ -774,3 +792,5 @@ export async function downloadAndInstallUpdate(): Promise<void> {
 export async function restartForUpdate(): Promise<void> {
   return invoke("restart_for_update");
 }
+
+export async function updaterEnabled(): Promise<boolean> { return invoke("updater_enabled"); }

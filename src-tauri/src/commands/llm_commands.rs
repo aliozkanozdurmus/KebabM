@@ -53,36 +53,9 @@ pub async fn list_models(
     provider: String,
     state: State<'_, AppState>,
 ) -> Result<String, String> {
-    let llm = state
-        .llm
-        .as_ref()
-        .ok_or_else(|| "LLM router not initialized".to_string())?;
+    let provider_arc = inspection_provider(&provider, &state)?;
 
-    // If the provider string is a JSON config, set it up first
-    let config: Option<ProviderConfig> = serde_json::from_str(&provider).ok();
-
-    let provider_arc = {
-        let mut router = llm
-            .lock()
-            .map_err(|e| format!("Failed to lock LLM router: {}", e))?;
-
-        // If a config was provided, set up the provider
-        if let Some(config) = config {
-            if let Some(credentials) = state.credentials.clone() {
-                router.set_credentials(credentials);
-            }
-            let config = attach_chatgpt_session(config, &state)?;
-            router
-                .set_provider(config)
-                .map_err(|e| format!("Failed to set provider: {}", e))?;
-        }
-
-        router
-            .get_provider()
-            .map_err(|e| format!("No active provider: {}", e))?
-    };
-
-    let provider_guard = provider_arc.lock().await;
+    let provider_guard = provider_arc.clone();
     let models = provider_guard
         .list_models()
         .await
@@ -114,41 +87,32 @@ pub async fn set_active_model(
 #[command]
 pub async fn test_llm_connection(
     provider: String,
+    model_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    let llm = state
-        .llm
-        .as_ref()
-        .ok_or_else(|| "LLM router not initialized".to_string())?;
+    let client = inspection_provider(&provider, &state)?;
+    let model = model_id.filter(|s| !s.trim().is_empty()).or_else(|| {
+        state.llm.as_ref().and_then(|llm| llm.lock().ok().map(|r| r.active_model().to_string()))
+    }).filter(|s| !s.is_empty()).ok_or("Select a model before testing.")?;
+    let sink = crate::llm::request::ResponseSink::private();
+    crate::llm::request::complete(client.as_ref(), vec![crate::llm::provider::LLMMessage {
+        role: "user".into(), content: "Reply with OK.".into(),
+    }], &model, crate::llm::provider::GenerationParams::default(), sink).await
+        .map_err(|e| crate::llm::request::user_error(&e))?;
+    Ok(true)
+}
 
-    // If the provider string is a JSON config, set it up first
-    let config: Option<ProviderConfig> = serde_json::from_str(&provider).ok();
-
-    let provider_arc = {
-        let mut router = llm
-            .lock()
-            .map_err(|e| format!("Failed to lock LLM router: {}", e))?;
-
-        if let Some(config) = config {
-            if let Some(credentials) = state.credentials.clone() {
-                router.set_credentials(credentials);
-            }
-            let config = attach_chatgpt_session(config, &state)?;
-            router
-                .set_provider(config)
-                .map_err(|e| format!("Failed to set provider: {}", e))?;
-        }
-
-        router
-            .get_provider()
-            .map_err(|e| format!("No active provider: {}", e))?
-    };
-
-    let provider_guard = provider_arc.lock().await;
-    provider_guard
-        .test_connection()
-        .await
-        .map_err(|e| format!("Connection test failed: {}", e))
+// Catalogs and connection tests must not switch the provider of an active meeting.
+pub(crate) fn inspection_provider(provider: &str, state: &AppState) -> Result<std::sync::Arc<dyn crate::llm::provider::LLMProvider>, String> {
+    if let Ok(config) = serde_json::from_str::<ProviderConfig>(provider) {
+        let mut router = LLMRouter::new();
+        if let Some(credentials) = state.credentials.clone() { router.set_credentials(credentials); }
+        router.set_provider(attach_chatgpt_session(config, state)?).map_err(|e| crate::llm::request::user_error(&e))?;
+        router.get_provider().map_err(|e| crate::llm::request::user_error(&e))
+    } else {
+        state.llm.as_ref().ok_or("Select an AI provider.")?.lock().map_err(|e| e.to_string())?
+            .get_provider().map_err(|e| crate::llm::request::user_error(&e))
+    }
 }
 
 fn attach_chatgpt_session(

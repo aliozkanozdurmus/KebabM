@@ -173,6 +173,9 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
+            if updater_commands::updater_enabled(app.handle().clone()) {
+                app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
             let mut app_state = AppState::new();
 
             // -- Initialize DatabaseManager --
@@ -323,6 +326,7 @@ pub fn run() {
             log::info!("OPUS-MT model manager initialized");
 
             app.manage(app_state);
+            intelligence::session::start_worker(app.handle().clone());
 
             // -- Auto-detect first Ollama model in background --
             let auto_detect_app = app.handle().clone();
@@ -346,7 +350,7 @@ pub fn run() {
 
                     if needs_model {
                         if let Some(provider_arc) = provider_arc {
-                            let provider = provider_arc.lock().await;
+                            let provider = provider_arc.clone();
                             match provider.list_models().await {
                                 Ok(models) if !models.is_empty() => {
                                     let first_model = models[0].id.clone();
@@ -565,6 +569,19 @@ pub fn run() {
             project_commands::delete_project,
             project_commands::set_active_project,
             project_commands::scan_project,
+            project_commands::project_knowledge_status,
+            project_commands::project_memory,
+            project_commands::save_open_question,
+            project_commands::update_project_memory,
+            project_commands::project_preparation,
+            project_commands::project_documents,
+            project_commands::link_project_document,
+            project_commands::draft_meeting_decisions,
+            project_commands::project_embedding_config,
+            project_commands::embed_project,
+            project_commands::search_project_knowledge,
+            project_commands::read_project_evidence,
+            project_commands::generate_project_handbook,
             project_commands::set_meeting_feed,
             meeting_commands::import_meeting_transcript,
             meeting_commands::start_meeting,
@@ -643,6 +660,7 @@ pub fn run() {
             translation_model_commands::activate_opus_mt_model,
             // == COMMANDS: updater ==
             platform::get_platform_capabilities,
+            updater_commands::updater_enabled,
             updater_commands::check_for_update,
             updater_commands::download_and_install_update,
             updater_commands::restart_for_update,

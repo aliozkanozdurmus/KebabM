@@ -3,7 +3,8 @@
 // Also processes speaker_id through speakerStore for enrichment and stats.
 
 import { useEffect, useRef } from "react";
-import type { UnlistenFn } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { showToast } from "../stores/toastStore";
 import { onTranscriptUpdate, onTranscriptFinal } from "../lib/events";
 import { useTranscriptStore } from "../stores/transcriptStore";
 import { useSpeakerStore } from "../stores/speakerStore";
@@ -119,12 +120,15 @@ export function useTranscript() {
     let unlistenUpdate: UnlistenFn | null = null;
     let unlistenFinal: UnlistenFn | null = null;
     let mounted = true;
+    const errors = listen<{ message: string; sessionId?: string }>("transcript_error", e => {
+      if (mounted && e.payload.sessionId === _meetingStoreRef?.useMeetingStore.getState().activeMeeting?.id) showToast(e.payload.message, "error");
+    });
 
     const setup = async () => {
       // Subscribe to interim transcript updates — upsert by id
       const unlisten1 = await onTranscriptUpdate(
         (event: TranscriptUpdateEvent) => {
-          if (!mounted) return;
+          if (!mounted || (event.segment.sessionId && event.segment.sessionId !== _meetingStoreRef?.useMeetingStore.getState().activeMeeting?.id)) return;
           const enriched = processSpeaker(event.segment);
           if (!enriched) return; // Discarded (e.g., "User" in in-person mode)
           updateRef.current(enriched);
@@ -134,7 +138,7 @@ export function useTranscript() {
       // Subscribe to final transcript results — replace interim in-place (same id)
       const unlisten2 = await onTranscriptFinal(
         (event: TranscriptUpdateEvent) => {
-          if (!mounted) return;
+          if (!mounted || (event.segment.sessionId && event.segment.sessionId !== _meetingStoreRef?.useMeetingStore.getState().activeMeeting?.id)) return;
           const enriched = processSpeaker(event.segment);
           if (!enriched) return; // Discarded
           // Use updateInterimSegment so it replaces the interim with same id,
@@ -158,6 +162,7 @@ export function useTranscript() {
       mounted = false;
       if (unlistenUpdate) unlistenUpdate();
       if (unlistenFinal) unlistenFinal();
+      errors.then(stop => stop());
     };
   }, []);
 }

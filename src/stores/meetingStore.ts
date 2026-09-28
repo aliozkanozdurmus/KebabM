@@ -181,6 +181,8 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
         await setRecordingEnabled(config.recordingEnabled);
       } catch { /* non-critical */ }
 
+      useTranscriptStore.getState().clearSegments();
+      let captureStarted = false;
       // 3. Start audio capture — use per-party config if available, else legacy
       try {
         if (config.meetingAudioConfig) {
@@ -205,13 +207,13 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
           const sysId = config.systemDeviceId || "default";
           await startCapture(micId, sysId);
         }
+      captureStarted = true;
       } catch (err) {
-        console.warn("[meetingStore] Audio capture failed to start:", err);
-        // Continue anyway — meeting is created, user can still use AI features
+        const { showToast } = await import("./toastStore");
+        showToast(`Audio could not start: ${String(err)}. Manual assistance is available.`, "error");
       }
 
-      // 3. Clear previous transcript segments and leftover AI state
-      useTranscriptStore.getState().clearSegments();
+      // Clear leftover AI state before showing the new meeting.
 
       // Clear AI response history, dev log, and call log from any prior meeting
       try {
@@ -246,7 +248,7 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
       const now = Date.now();
       set({
         activeMeeting: meeting,
-        isRecording: true,
+        isRecording: captureStarted,
         meetingStartTime: now,
         elapsedMs: 0,
         lastPersistedIndex: 0,
@@ -264,6 +266,7 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
           meeting,
           audioMode: resolvedMode,
           aiScenario: resolvedScenario,
+          captureStarted,
         }).catch(() => {});
       });
     } catch (err) {
@@ -309,36 +312,7 @@ export const useMeetingStore = create<MeetingState>((set, get) => ({
       }
     }
 
-    // 4. Persist AI call log entries as AI interactions before ending
-    if (meeting) {
-      try {
-        const { useCallLogStore } = await import("./callLogStore");
-        const entries = useCallLogStore.getState().entries;
-        if (entries.length > 0) {
-          const interactions = entries
-            .filter((e) => e.status === "complete")
-            .map((e) => ({
-              id: e.id,
-              meeting_id: meeting.id,
-              mode: e.mode,
-              question_context: e.actualUserPrompt || "",
-              response: e.responseContentClean || e.responseContent,
-              model: e.model,
-              provider: e.provider,
-              latency_ms: e.latencyMs ?? 0,
-              timestamp: new Date(e.timestamp).toISOString(),
-            }));
-          if (interactions.length > 0) {
-            await saveMeetingAiInteractions(
-              meeting.id,
-              JSON.stringify(interactions)
-            );
-          }
-        }
-      } catch (err) {
-        console.error("[meetingStore] Failed to persist AI interactions:", err);
-      }
-    }
+    // AI answers are persisted by Rust immediately after each successful completion.
 
     // 5. End meeting record in DB
     if (meeting) {

@@ -6,16 +6,28 @@ pub fn run(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch("PRAGMA journal_mode=WAL;")?;
     conn.execute_batch("PRAGMA foreign_keys=ON;")?;
 
-    v1_schema(conn)?;
-    v2_rag_schema(conn)?;
-    v3_meeting_mode_schema(conn)?;
-    v4_bookmark_segment_id(conn)?;
-    v5_recording_columns(conn)?;
-    v6_translation_schema(conn)?;
-    v7_projects_schema(conn)?;
-    v8_project_modules_schema(conn)?;
-    v9_meeting_project_schema(conn)?;
+    let version: u32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version >= 12 { return Ok(()); }
+    let tx = conn.unchecked_transaction()?;
+    if version < 9 {
+    v1_schema(&tx)?;
+    v2_rag_schema(&tx)?;
+    v3_meeting_mode_schema(&tx)?;
+    v4_bookmark_segment_id(&tx)?;
+    v5_recording_columns(&tx)?;
+    v6_translation_schema(&tx)?;
+    v7_projects_schema(&tx)?;
+    v8_project_modules_schema(&tx)?;
+    v9_meeting_project_schema(&tx)?;
 
+    }
+    crate::projects::knowledge::schema(&tx)?;
+    crate::projects::preparation::schema(&tx)?;
+    if version < 12 {
+        tx.execute_batch("ALTER TABLE project_documents ADD COLUMN content TEXT;")?;
+    }
+    tx.execute_batch("PRAGMA user_version=12;")?;
+    tx.commit()?;
     log::info!("Database migrations completed successfully");
     Ok(())
 }
@@ -87,7 +99,7 @@ fn v2_rag_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
             // "duplicate column name" is expected on re-runs; any other error is real
             let msg = e.to_string();
             if !msg.contains("duplicate column") {
-                log::warn!("ALTER TABLE context_resources warning: {}", msg);
+                return Err(e);
             }
         }
     }
@@ -177,7 +189,7 @@ fn v4_bookmark_segment_id(conn: &Connection) -> Result<(), rusqlite::Error> {
     {
         let msg = e.to_string();
         if !msg.contains("duplicate column") {
-            log::warn!("ALTER TABLE meeting_bookmarks warning: {}", msg);
+            return Err(e);
         }
     }
 
@@ -242,7 +254,7 @@ fn v3_meeting_mode_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         if let Err(e) = conn.execute_batch(alter) {
             let msg = e.to_string();
             if !msg.contains("duplicate column") {
-                log::warn!("ALTER TABLE meetings warning: {}", msg);
+                return Err(e);
             }
         }
     }
@@ -253,7 +265,7 @@ fn v3_meeting_mode_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
     {
         let msg = e.to_string();
         if !msg.contains("duplicate column") {
-            log::warn!("ALTER TABLE transcript_segments warning: {}", msg);
+            return Err(e);
         }
     }
 
@@ -357,7 +369,7 @@ fn v9_meeting_project_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
         if let Err(e) = conn.execute_batch(alter) {
             let msg = e.to_string();
             if !msg.contains("duplicate column") {
-                log::warn!("ALTER TABLE meetings warning: {}", msg);
+                return Err(e);
             }
         }
     }

@@ -3,7 +3,6 @@
 use futures::StreamExt;
 use serde_json::json;
 use std::time::Instant;
-use tauri::Emitter;
 
 use super::provider::{
     CompletionStats, GenerationParams, LLMError, LLMMessage, LLMProvider, ModelInfo,
@@ -59,6 +58,7 @@ impl LLMProvider for OllamaClient {
                             .unwrap_or(&name)
                             .to_string();
                         Some(ModelInfo {
+                            max_output_tokens: None, capabilities: None,
                             id: name.clone(),
                             name: model_name,
                             provider: "ollama".to_string(),
@@ -107,7 +107,7 @@ impl LLMProvider for OllamaClient {
         messages: Vec<LLMMessage>,
         model: &str,
         params: GenerationParams,
-        app_handle: tauri::AppHandle,
+        app_handle: super::request::ResponseSink,
     ) -> Result<CompletionStats, LLMError> {
         let url = format!("{}/api/chat", self.base_url);
         let start = Instant::now();
@@ -175,8 +175,7 @@ impl LLMProvider for OllamaClient {
                 LLMError::HttpError(e)
             })?;
 
-            let chunk_str = String::from_utf8_lossy(&chunk);
-            let lines = line_buffer.push(&chunk_str);
+            let lines = line_buffer.push_bytes(&chunk);
 
             for line in lines {
                 let parsed = NDJSONParser::parse_chunk(&line);

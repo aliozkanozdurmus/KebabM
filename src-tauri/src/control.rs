@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tauri_plugin_store::StoreExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -8,12 +8,16 @@ use uuid::Uuid;
 
 use crate::state::AppState;
 
+mod extended;
+
 const PORTS: &[u16] = &[47331, 47332, 47333];
 const STORE_FILE: &str = "config.json";
 const MAX_BODY: usize = 4_000_000;
 
 const SETTING_KEYS: &[&str] = &[
     "theme",
+    "appearance",
+    "aiReplyLanguage",
     "sttProvider",
     "sttLanguage",
     "llmProvider",
@@ -57,6 +61,9 @@ const SETTING_KEYS: &[&str] = &[
 ];
 
 const SECRET_NAMES: &[&str] = &[
+    "translation_microsoft",
+    "translation_google",
+    "translation_deepl",
     "openai",
     "anthropic",
     "gemini",
@@ -106,7 +113,7 @@ pub fn start(app: AppHandle) {
             let _ = std::fs::create_dir_all(&dir);
             let file = dir.join("zaiqo-control.json");
             let body = json!({ "port": port, "token": token, "host": "127.0.0.1" });
-            let _ = std::fs::write(&file, body.to_string());
+            if let Err(e)=write_control_file(&file,&body.to_string()){log::error!("Cannot protect control token file: {e}");return;}
             log::info!("zaiqoM control file written to {}", file.display());
         }
         log::info!("zaiqoM control server listening on 127.0.0.1:{port}");
@@ -128,7 +135,7 @@ async fn handle_client(
     app: &AppHandle,
     token: &str,
 ) -> Result<(), ()> {
-    let (headers, body) = read_http(socket).await?;
+    let (headers, body) = tokio::time::timeout(Duration::from_secs(30), read_http(socket)).await.map_err(|_| ())??;
     let mut parts = headers.lines().next().unwrap_or("").split_whitespace();
     let method = parts.next().unwrap_or("");
     let path = parts.next().unwrap_or("").split('?').next().unwrap_or("");
@@ -147,7 +154,15 @@ async fn handle_client(
     let tool = payload.get("tool").and_then(|v| v.as_str()).unwrap_or("");
     let args = payload.get("arguments").cloned().unwrap_or(json!({}));
     log::info!("zaiqoM control tool: {tool}");
-    let result = dispatch(app, tool, args).await;
+    // An MCP cancellation closes the HTTP connection. Dropping dispatch drops
+    // provider futures and their request leases. Blocking file discovery may finish
+    // in the background, but cannot replace the index after dispatch is dropped.
+    let mut disconnected = [0u8; 1];
+    let result = tokio::select! {
+        result = dispatch(app, tool, args) => result,
+        _ = socket.read(&mut disconnected) => return Ok(()),
+        _ = tokio::time::sleep(Duration::from_secs(1800)) => json!({"ok":false,"error":"Operation timed out; inspect state before retrying"}),
+    };
     let status = if result.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
         200
     } else {
@@ -216,6 +231,8 @@ async fn read_http(socket: &mut tokio::net::TcpStream) -> Result<(String, Vec<u8
 }
 
 fn authorized(headers: &str, token: &str) -> bool {
+    // Browser pages cannot call the local control API, even with a leaked token.
+    if headers.lines().any(|l|l.split_once(':').is_some_and(|(n,_)|n.trim().eq_ignore_ascii_case("origin"))){return false;}
     let expected = format!("Bearer {token}");
     headers.lines().any(|line| {
         let Some((name, value)) = line.split_once(':') else {
@@ -272,12 +289,12 @@ async fn dispatch(app: &AppHandle, tool: &str, args: Value) -> Value {
         "get_meeting" => get_meeting(app, &args),
         "search_meetings" => search_meetings(app, &args),
         "import_transcript" => import_transcript(app, &args),
-        "start_meeting" => start_meeting(app, &args),
-        "end_meeting" => end_meeting(app),
+        "start_meeting" => extended::dispatch(app, tool, &args).await,
+        "end_meeting" => extended::dispatch(app, tool, &args).await,
         "rename_meeting" => rename_meeting(app, &args).await,
         "delete_meeting" => delete_meeting(app, &args).await,
         "set_custom_instructions" => set_custom_instructions(app, &args).await,
-        _ => Err(format!("Unknown tool: {tool}")),
+        _ => extended::dispatch(app, tool, &args).await,
     };
     match outcome {
         Ok(result) => json!({"ok": true, "result": result}),
@@ -297,7 +314,7 @@ fn status(app: &AppHandle) -> Result<Value, String> {
     let open_meeting = open_live_meeting(db.connection())?;
     drop(db);
     Ok(json!({
-        "name": "zaiqoM",
+        "name": "ZaiqoM-MeetingHelper",
         "version": env!("CARGO_PKG_VERSION"),
         "language": language,
         "settings": picked_settings(app)?,
@@ -343,6 +360,11 @@ async fn set_settings(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let Some(map) = values.as_object() else {
         return Err("settings must be an object".to_string());
     };
+    if let Some(value) = map.get("appearance") {
+        if !matches!(value.as_str(), Some("ibm" | "liquid-glass" | "apple" | "linear" | "notion" | "material" | "github" | "terminal")) {
+            return Err("Unknown appearance. Use ibm, liquid-glass, apple, linear, notion, material, github, or terminal.".to_string());
+        }
+    }
     let mut unknown = Vec::new();
     for key in map.keys() {
         if !setting_allowed(key) {
@@ -373,6 +395,11 @@ async fn set_settings(app: &AppHandle, args: &Value) -> Result<Value, String> {
     store.save().map_err(|e| e.to_string())?;
 
     let mut warnings = Vec::new();
+    if let Some(language) = map.get("aiReplyLanguage").and_then(|v| v.as_str()) {
+        if let Err(error) = crate::commands::intelligence_commands::set_ai_reply_language(language.to_string(), app.state()) {
+            warnings.push(error);
+        }
+    }
     if let Some(language) = map.get("sttLanguage").and_then(|v| v.as_str()) {
         if let Err(error) = crate::commands::stt_commands::set_stt_language(app.clone(), language.to_string()).await {
             warnings.push(error);
@@ -506,20 +533,21 @@ async fn configure_llm(app: &AppHandle, args: &Value, persist_choice: bool) -> R
     }))
 }
 
-async fn list_models(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    if args.get("provider").and_then(|v| v.as_str()).is_some() {
-        configure_llm(app, args, true).await?;
-    }
-    let raw = crate::commands::llm_commands::list_models("{}".to_string(), app.state()).await?;
-    serde_json::from_str(&raw).map_err(|e| e.to_string())
+fn inspection_config(app: &AppHandle, args: &Value) -> Result<String,String> {
+    let Some(provider)=optional_string(args,"provider") else{return Ok("{}".into());};
+    if !crate::llm::LLMRouter::get_all_providers().iter().any(|p|p.provider_type==provider){return Err("Unknown provider".into());}
+    let state=app.state::<AppState>();
+    let key=creds(&state)?.get_key(&provider)?;
+    let base=if provider=="azure"{creds(&state)?.get_key("azure_endpoint")?}else{None};
+    Ok(json!({"provider_type":provider,"api_key":key,"base_url":base}).to_string())
 }
-
-async fn test_llm(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    if args.get("provider").and_then(|v| v.as_str()).is_some() {
-        configure_llm(app, args, true).await?;
-    }
-    let ok = crate::commands::llm_commands::test_llm_connection("{}".to_string(), app.state()).await?;
-    Ok(json!({"ok": ok}))
+async fn list_models(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let raw=crate::commands::llm_commands::list_models(inspection_config(app,args)?,app.state()).await?;
+    serde_json::from_str(&raw).map_err(|e|e.to_string())
+}
+async fn test_llm(app: &AppHandle, args: &Value) -> Result<Value,String> {
+    let ok=crate::commands::llm_commands::test_llm_connection(inspection_config(app,args)?,optional_string(args,"model"),app.state()).await?;
+    Ok(json!({"ok":ok}))
 }
 
 async fn sign_in_chatgpt(app: &AppHandle) -> Result<Value, String> {
@@ -711,34 +739,6 @@ fn import_transcript(app: &AppHandle, args: &Value) -> Result<Value, String> {
     serde_json::to_value(meeting).map_err(|e| e.to_string())
 }
 
-fn start_meeting(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    let mut payload = serde_json::Map::new();
-    if let Some(title) = optional_string(args, "title") {
-        payload.insert("title".to_string(), json!(title));
-    }
-    if let Some(mode) = optional_choice(args, "audio_mode", &["online", "in_person"])? {
-        payload.insert("audio_mode".to_string(), json!(mode));
-    }
-    if let Some(scenario) = optional_choice(
-        args,
-        "scenario",
-        &["team_meeting", "lecture", "interview", "webinar", "oral_exam", "custom"],
-    )? {
-        payload.insert("scenario".to_string(), json!(scenario));
-    }
-    emit_window(app, "launcher", "zaiqo:start-meeting", Value::Object(payload.clone()))?;
-    Ok(json!({"requested": true, "payload": payload}))
-}
-
-fn end_meeting(app: &AppHandle) -> Result<Value, String> {
-    if app.get_webview_window("overlay").is_some() {
-        emit_window(app, "overlay", "zaiqo:end-meeting", json!({}))?;
-    } else {
-        emit_window(app, "launcher", "zaiqo:end-meeting", json!({}))?;
-    }
-    Ok(json!({"requested": true}))
-}
-
 async fn rename_meeting(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = required_string(args, "id")?;
     let title = required_string(args, "title")?;
@@ -770,13 +770,6 @@ async fn set_custom_instructions(app: &AppHandle, args: &Value) -> Result<Value,
     store.save().map_err(|e| e.to_string())?;
     crate::commands::context_commands::set_custom_instructions(text.clone(), app.state()).await?;
     Ok(json!({"saved": true, "chars": text.chars().count()}))
-}
-
-fn emit_window(app: &AppHandle, label: &str, event: &str, payload: Value) -> Result<(), String> {
-    let window = app
-        .get_webview_window(label)
-        .ok_or_else(|| format!("{label} window is not open. Open zaiqoM first."))?;
-    window.emit(event, payload).map_err(|e| e.to_string())
 }
 
 fn write_setting(app: &AppHandle, key: &str, value: Value) -> Result<(), String> {
@@ -839,6 +832,7 @@ fn optional_string(args: &Value, key: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+#[cfg(test)]
 fn optional_choice(args: &Value, key: &str, allowed: &[&str]) -> Result<Option<String>, String> {
     let Some(value) = optional_string(args, key) else {
         return Ok(None);
@@ -899,4 +893,13 @@ mod tests {
         let error = optional_choice(&args, "audio_mode", &["online", "in_person"]).unwrap_err();
         assert!(error.contains("online"));
     }
+}
+
+fn write_control_file(path:&std::path::Path,body:&str)->std::io::Result<()> {
+    use std::io::Write;
+    let mut options=std::fs::OpenOptions::new();options.write(true).create(true).truncate(true);
+    #[cfg(unix)] {use std::os::unix::fs::OpenOptionsExt;options.mode(0o600);}
+    let mut file=options.open(path)?;
+    #[cfg(unix)] {use std::os::unix::fs::PermissionsExt;file.set_permissions(std::fs::Permissions::from_mode(0o600))?;}
+    file.write_all(body.as_bytes())
 }

@@ -1,3 +1,4 @@
+import { resolveAppearance, type AppearanceId } from "../lib/appearances";
 import { create } from "zustand";
 import { load, Store } from "@tauri-apps/plugin-store";
 import type {
@@ -81,6 +82,7 @@ async function persistValue(key: string, value: unknown): Promise<void> {
 interface ConfigState {
   // Appearance
   theme: ThemeMode;
+  appearance: AppearanceId;
 
   // Providers
   sttProvider: STTProviderType;
@@ -185,6 +187,7 @@ interface ConfigState {
 
   // Actions
   setTheme: (theme: ThemeMode) => void;
+  setAppearance: (appearance: AppearanceId) => void;
   setContextStrategy: (strategy: ContextStrategy) => void;
   setSTTProvider: (provider: STTProviderType) => void;
   setSTTLanguage: (language: string) => void;
@@ -243,11 +246,12 @@ interface ConfigState {
 
 export const useConfigStore = create<ConfigState>((set) => ({
   theme: "dark",
-  sttProvider: "windows_native",
+  appearance: "ibm",
+  sttProvider: "deepgram",
   sttLanguage: "en-US",
   aiReplyLanguage: "en",
-  llmProvider: "ollama",
-  llmModel: "",
+  llmProvider: "anthropic",
+  llmModel: "claude-sonnet-5",
   micDeviceId: null,
   systemDeviceId: null,
   recordingEnabled: false,
@@ -315,6 +319,11 @@ export const useConfigStore = create<ConfigState>((set) => ({
   setContextStrategy: (strategy) => {
     set({ contextStrategy: strategy });
     persistValue("contextStrategy", strategy);
+  },
+  setAppearance: (value) => {
+    const appearance = resolveAppearance(value);
+    set({ appearance });
+    persistValue("appearance", appearance);
   },
   setTheme: (theme) => {
     set({ theme });
@@ -655,6 +664,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
       const alreadyLoaded = useConfigStore.getState()._loaded;
       const store = await getStore();
 
+      const appearance = resolveAppearance(await store.get("appearance"));
       const theme = await store.get<ThemeMode>("theme");
       const sttProvider = await store.get<STTProviderType>("sttProvider");
       const sttLanguage = await store.get<string>("sttLanguage");
@@ -805,6 +815,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
       set((state) => ({
         ...state,
         _loaded: true,
+        appearance,
         ...(theme != null && { theme }),
         ...(sttProvider != null && { sttProvider }),
         ...(sttLanguage != null && { sttLanguage }),
@@ -917,6 +928,9 @@ export const useConfigStore = create<ConfigState>((set) => ({
       });
       store.onKeyChange<number>("overlayOpacity", (val) => {
         if (val != null) set({ overlayOpacity: val });
+      });
+      store.onKeyChange("appearance", (val) => {
+        set({ appearance: resolveAppearance(val) });
       });
       store.onKeyChange<ThemeMode>("theme", (val) => {
         if (val != null) set({ theme: val });

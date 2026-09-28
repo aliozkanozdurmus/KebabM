@@ -1605,7 +1605,7 @@ function GroqAdvancedSettings() {
             <textarea
               value={groqConfig.prompt}
               onChange={(e) => updateField("prompt", e.target.value)}
-              placeholder="e.g., zaiqoM, meeting, roadmap, transcription..."
+              placeholder="e.g., ZaiqoM-MeetingHelper, meeting, roadmap, transcription..."
               rows={2}
               className="w-full rounded-lg border border-border/50 bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary/20 resize-none"
             />

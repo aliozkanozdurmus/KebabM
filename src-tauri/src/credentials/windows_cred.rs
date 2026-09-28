@@ -78,7 +78,7 @@ fn read_target(target: &str) -> Result<Option<String>, String> {
         let result = CredReadW(
             PCWSTR(target_wide.as_ptr()),
             CRED_TYPE_GENERIC,
-            0,
+            None,
             &mut pcred,
         );
 
@@ -120,11 +120,7 @@ pub fn credential_delete(provider: &str) -> Result<(), String> {
     let target_wide = to_wide(&target);
 
     unsafe {
-        let result = CredDeleteW(
-            PCWSTR(target_wide.as_ptr()),
-            CRED_TYPE_GENERIC,
-            0,
-        );
+        let result = CredDeleteW(PCWSTR(target_wide.as_ptr()), CRED_TYPE_GENERIC, None);
 
         match result {
             Ok(()) => Ok(()),

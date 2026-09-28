@@ -3,7 +3,6 @@
 use futures::StreamExt;
 use serde_json::json;
 use std::time::Instant;
-use tauri::Emitter;
 
 use super::provider::{
     CompletionStats, GenerationParams, LLMError, LLMMessage, LLMProvider, ModelInfo,
@@ -21,47 +20,9 @@ impl AnthropicClient {
     pub fn new(api_key: &str, base_url: Option<&str>) -> Self {
         Self {
             api_key: api_key.to_string(),
-            base_url: base_url
-                .unwrap_or("https://api.anthropic.com")
-                .to_string(),
+            base_url: base_url.unwrap_or("https://api.anthropic.com").to_string(),
             client: reqwest::Client::new(),
         }
-    }
-
-    /// Anthropic does not provide a list models endpoint, so we return hardcoded known models.
-    fn hardcoded_models() -> Vec<ModelInfo> {
-        vec![
-            ModelInfo {
-                id: "claude-sonnet-4-20250514".to_string(),
-                name: "Claude Sonnet 4".to_string(),
-                provider: "anthropic".to_string(),
-                context_window: Some(200000),
-            },
-            ModelInfo {
-                id: "claude-haiku-4-20250414".to_string(),
-                name: "Claude Haiku 4".to_string(),
-                provider: "anthropic".to_string(),
-                context_window: Some(200000),
-            },
-            ModelInfo {
-                id: "claude-opus-4-20250514".to_string(),
-                name: "Claude Opus 4".to_string(),
-                provider: "anthropic".to_string(),
-                context_window: Some(200000),
-            },
-            ModelInfo {
-                id: "claude-3-5-sonnet-20241022".to_string(),
-                name: "Claude 3.5 Sonnet".to_string(),
-                provider: "anthropic".to_string(),
-                context_window: Some(200000),
-            },
-            ModelInfo {
-                id: "claude-3-5-haiku-20241022".to_string(),
-                name: "Claude 3.5 Haiku".to_string(),
-                provider: "anthropic".to_string(),
-                context_window: Some(200000),
-            },
-        ]
     }
 
     /// Parse Anthropic-specific SSE event types.
@@ -90,7 +51,11 @@ impl AnthropicClient {
                 if let Ok(val) = serde_json::from_str::<serde_json::Value>(data) {
                     let event_type = current_event_type
                         .clone()
-                        .or_else(|| val.get("type").and_then(|t| t.as_str()).map(|s| s.to_string()))
+                        .or_else(|| {
+                            val.get("type")
+                                .and_then(|t| t.as_str())
+                                .map(|s| s.to_string())
+                        })
                         .unwrap_or_default();
 
                     events.push(AnthropicEvent {
@@ -118,32 +83,59 @@ impl LLMProvider for AnthropicClient {
     }
 
     async fn list_models(&self) -> Result<Vec<ModelInfo>, LLMError> {
-        Ok(Self::hardcoded_models())
+        let mut models = Vec::new();
+        let mut after = String::new();
+        loop {
+            let mut request = self
+                .client
+                .get(format!("{}/v1/models", self.base_url.trim_end_matches('/')))
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", "2023-06-01")
+                .query(&[("limit", "1000")])
+                .timeout(std::time::Duration::from_secs(20));
+            if !after.is_empty() {
+                request = request.query(&[("after_id", &after)]);
+            }
+            let response = request.send().await?;
+            if !response.status().is_success() {
+                return Err(LLMError::ProviderError(format!(
+                    "Model catalog HTTP {}",
+                    response.status()
+                )));
+            }
+            let value: serde_json::Value = response.json().await?;
+            let data = value["data"]
+                .as_array()
+                .ok_or_else(|| LLMError::InvalidResponse("Invalid model catalog".into()))?;
+            for item in data {
+                if let Some(id) = item["id"].as_str() {
+                    models.push(ModelInfo {
+                        max_output_tokens: item["max_tokens"].as_u64(),
+                        capabilities: item.get("capabilities").filter(|v| !v.is_null()).cloned(),
+                        id: id.into(),
+                        name: item["display_name"].as_str().unwrap_or(id).into(),
+                        provider: "anthropic".into(),
+                        context_window: item["max_input_tokens"].as_u64(),
+                    });
+                }
+            }
+            if value["has_more"].as_bool() != Some(true) {
+                break;
+            }
+            let next = value["last_id"]
+                .as_str()
+                .filter(|id| !id.is_empty() && *id != after)
+                .ok_or_else(|| LLMError::InvalidResponse("Invalid model catalog cursor".into()))?;
+            after = next.into();
+            if models.len() > 10000 {
+                return Err(LLMError::InvalidResponse("Model catalog too large".into()));
+            }
+        }
+        Ok(models)
     }
 
     async fn test_connection(&self) -> Result<bool, LLMError> {
-        // Send a minimal request to verify the API key works
-        let url = format!("{}/v1/messages", self.base_url);
-
-        let body = json!({
-            "model": "claude-3-5-haiku-20241022",
-            "max_tokens": 1,
-            "messages": [
-                {"role": "user", "content": "Hi"}
-            ]
-        });
-
-        let response = self
-            .client
-            .post(&url)
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        Ok(response.status().is_success())
+        Ok(!self.list_models().await?.is_empty())
     }
 
     async fn stream_completion(
@@ -151,7 +143,7 @@ impl LLMProvider for AnthropicClient {
         messages: Vec<LLMMessage>,
         model: &str,
         params: GenerationParams,
-        app_handle: tauri::AppHandle,
+        app_handle: super::request::ResponseSink,
     ) -> Result<CompletionStats, LLMError> {
         let url = format!("{}/v1/messages", self.base_url);
         let start = Instant::now();
@@ -179,8 +171,18 @@ impl LLMProvider for AnthropicClient {
             "stream": true
         });
 
-        if let Some(temp) = params.temperature {
-            body["temperature"] = json!(temp);
+        // Only legacy models accept custom sampling parameters. New catalogs can
+        // introduce models with different capabilities; omit optional parameters by default.
+        if model.starts_with("claude-3")
+            || model.starts_with("claude-haiku-4")
+            || model.starts_with("claude-sonnet-4")
+        {
+            if let Some(temp) = params.temperature {
+                body["temperature"] = json!(temp);
+            }
+        }
+        if model.starts_with("claude-sonnet-5") && max_tokens <= 512 {
+            body["thinking"] = json!({"type":"disabled"});
         }
 
         if let Some(system) = &system_content {
@@ -228,8 +230,7 @@ impl LLMProvider for AnthropicClient {
                 LLMError::HttpError(e)
             })?;
 
-            let chunk_str = String::from_utf8_lossy(&chunk);
-            let lines = line_buffer.push(&chunk_str);
+            let lines = line_buffer.push_bytes(&chunk);
 
             for line in lines {
                 let events = Self::parse_anthropic_sse(&line);
@@ -237,8 +238,11 @@ impl LLMProvider for AnthropicClient {
                     match event.event_type.as_str() {
                         "message_start" => {
                             // Extract input token count from usage
-                            if let Some(usage) = event.data.get("message").and_then(|m| m.get("usage")) {
-                                if let Some(it) = usage.get("input_tokens").and_then(|v| v.as_u64()) {
+                            if let Some(usage) =
+                                event.data.get("message").and_then(|m| m.get("usage"))
+                            {
+                                if let Some(it) = usage.get("input_tokens").and_then(|v| v.as_u64())
+                                {
                                     input_tokens = it;
                                 }
                             }
@@ -259,7 +263,9 @@ impl LLMProvider for AnthropicClient {
                         "message_delta" => {
                             // Extract output token count
                             if let Some(usage) = event.data.get("usage") {
-                                if let Some(ot) = usage.get("output_tokens").and_then(|v| v.as_u64()) {
+                                if let Some(ot) =
+                                    usage.get("output_tokens").and_then(|v| v.as_u64())
+                                {
                                     output_tokens = ot;
                                 }
                             }

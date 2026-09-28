@@ -4,7 +4,6 @@
 use futures::StreamExt;
 use serde_json::json;
 use std::time::Instant;
-use tauri::Emitter;
 
 use super::provider::{
     CompletionStats, GenerationParams, LLMError, LLMMessage, LLMProvider, ModelInfo,
@@ -93,6 +92,7 @@ impl LLMProvider for OpenAICompatClient {
                             .unwrap_or_else(|| m.get("id").and_then(|i| i.as_str()).unwrap_or(""))
                             .to_string();
                         Some(ModelInfo {
+                            max_output_tokens: None, capabilities: None,
                             id: id.clone(),
                             name: if name.is_empty() { id.clone() } else { name },
                             provider: self.config.provider_name.clone(),
@@ -160,7 +160,7 @@ impl LLMProvider for OpenAICompatClient {
         messages: Vec<LLMMessage>,
         model: &str,
         params: GenerationParams,
-        app_handle: tauri::AppHandle,
+        app_handle: super::request::ResponseSink,
     ) -> Result<CompletionStats, LLMError> {
         let url = format!("{}/chat/completions", self.config.base_url);
         let start = Instant::now();
@@ -227,8 +227,7 @@ impl LLMProvider for OpenAICompatClient {
                 LLMError::HttpError(e)
             })?;
 
-            let chunk_str = String::from_utf8_lossy(&chunk);
-            let lines = line_buffer.push(&chunk_str);
+            let lines = line_buffer.push_bytes(&chunk);
 
             for line in lines {
                 let events = SSEParser::parse_chunk(&line);

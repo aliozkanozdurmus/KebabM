@@ -53,10 +53,7 @@ fn extract_with_lopdf(file_path: &str) -> Result<String, String> {
     for page_id in doc.page_iter() {
         let font_maps = get_page_font_maps(&doc, page_id);
 
-        let content_bytes = match doc.get_page_content(page_id) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
+        let content_bytes = doc.get_page_content(page_id);
         let content = match Content::decode(&content_bytes) {
             Ok(c) => c,
             Err(_) => continue,
@@ -114,7 +111,7 @@ fn extract_with_lopdf(file_path: &str) -> Result<String, String> {
 fn get_page_font_maps(doc: &lopdf::Document, page_id: lopdf::ObjectId) -> HashMap<String, CharMap> {
     let mut maps: HashMap<String, CharMap> = HashMap::new();
 
-    let (resources, _) = doc.get_page_resources(page_id);
+    let Ok((resources, _)) = doc.get_page_resources(page_id) else { return HashMap::new(); };
     let resources = match resources {
         Some(r) => r,
         None => return maps,

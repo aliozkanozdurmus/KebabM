@@ -24,200 +24,87 @@ pub fn start_mic_capture(
     source: AudioSource,
 ) -> Result<Stream, String> {
     let device = super::device_manager::find_input_device(device_id)?;
-
-    let device_name = device.name().unwrap_or_else(|_| "unknown".into());
-    log::info!("Starting mic capture on device: {}", device_name);
-
-    let config = device
-        .default_input_config()
-        .map_err(|e| format!("Failed to get default input config: {}", e))?;
-
-    let sample_rate = config.sample_rate().0;
+    let config = device.default_input_config().map_err(|e| format!("Input configuration: {e}"))?;
+    let rate = config.sample_rate();
     let channels = config.channels();
-    let sample_format = config.sample_format();
-
-    log::info!(
-        "Mic capture config: {}Hz, {} channels, {:?}",
-        sample_rate,
-        channels,
-        sample_format
-    );
-
-    let err_fn = |err: cpal::StreamError| {
-        log::error!("Mic capture stream error: {}", err);
-    };
-
-    let stream = match sample_format {
-        SampleFormat::I16 => {
-            let tx = tx.clone();
-            let src = source.clone();
-            device
-                .build_input_stream(
-                    &config.into(),
-                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        handle_mic_data_i16(data, sample_rate, channels, &tx, &src);
-                    },
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| format!("Failed to build i16 input stream: {}", e))?
-        }
-        SampleFormat::F32 => {
-            let tx = tx.clone();
-            let src = source.clone();
-            device
-                .build_input_stream(
-                    &config.into(),
-                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        handle_mic_data_f32(data, sample_rate, channels, &tx, &src);
-                    },
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| format!("Failed to build f32 input stream: {}", e))?
-        }
-        SampleFormat::U16 => {
-            let tx = tx.clone();
-            let src = source;
-            device
-                .build_input_stream(
-                    &config.into(),
-                    move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                        handle_mic_data_u16(data, sample_rate, channels, &tx, &src);
-                    },
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| format!("Failed to build u16 input stream: {}", e))?
-        }
-        _ => {
-            return Err(format!("Unsupported sample format: {:?}", sample_format));
-        }
-    };
-
-    stream
-        .play()
-        .map_err(|e| format!("Failed to start mic stream: {}", e))?;
-
-    log::info!("Mic capture started successfully");
+    let stream = build_pcm_stream(&device, config, move |data| {
+        handle_mic_data_i16(data, rate, channels, &tx, &source);
+    })?;
+    stream.play().map_err(|e| format!("Start microphone: {e}"))?;
     Ok(stream)
 }
 
-/// Start a single capture that emits each chunk TWICE — once as Mic, once as System.
-/// Used when both YOU and THEM share the same input device to avoid opening two
-/// competing cpal streams on the same hardware.
-pub fn start_mic_capture_dual(
-    device_id: &str,
-    tx: mpsc::Sender<AudioChunk>,
-) -> Result<Stream, String> {
+/// One hardware stream when both roles share an input device.
+pub fn start_mic_capture_dual(device_id: &str, tx: mpsc::Sender<AudioChunk>) -> Result<Stream, String> {
     let device = super::device_manager::find_input_device(device_id)?;
-    let device_name = device.name().unwrap_or_else(|_| "unknown".into());
-    log::info!("Starting dual-tagged capture on device: {}", device_name);
-
-    let config = device
-        .default_input_config()
-        .map_err(|e| format!("Failed to get default input config: {}", e))?;
-
-    let sample_rate = config.sample_rate().0;
+    let config = device.default_input_config().map_err(|e| format!("Input configuration: {e}"))?;
+    let rate = config.sample_rate();
     let channels = config.channels();
-    let sample_format = config.sample_format();
-
-    let err_fn = |err: cpal::StreamError| {
-        log::error!("Dual capture stream error: {}", err);
-    };
-
-    let stream = match sample_format {
-        SampleFormat::I16 => {
-            let tx = tx.clone();
-            device
-                .build_input_stream(
-                    &config.into(),
-                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                        handle_dual_data_i16(data, sample_rate, channels, &tx);
-                    },
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| format!("Failed to build dual i16 stream: {}", e))?
+    let stream = build_pcm_stream(&device, config, move |data| {
+        if data.is_empty() { return; }
+        let pcm_data = resample(data, rate, TARGET_SAMPLE_RATE, channels);
+        let timestamp_ms = current_timestamp_ms();
+        for source in [AudioSource::Mic, AudioSource::System] {
+            let _ = tx.try_send(AudioChunk { pcm_data: pcm_data.clone(), source, timestamp_ms, is_speech: false });
         }
-        SampleFormat::F32 => {
-            let tx = tx.clone();
-            device
-                .build_input_stream(
-                    &config.into(),
-                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                        handle_dual_data_f32(data, sample_rate, channels, &tx);
-                    },
-                    err_fn,
-                    None,
-                )
-                .map_err(|e| format!("Failed to build dual f32 stream: {}", e))?
-        }
-        _ => {
-            return Err(format!("Unsupported sample format for dual capture: {:?}", sample_format));
-        }
-    };
-
-    stream
-        .play()
-        .map_err(|e| format!("Failed to start dual stream: {}", e))?;
-
-    log::info!("Dual-tagged capture started successfully");
+    })?;
+    stream.play().map_err(|e| format!("Start shared microphone: {e}"))?;
     Ok(stream)
 }
 
-fn handle_dual_data_i16(
-    data: &[i16],
-    sample_rate: u32,
-    channels: u16,
-    tx: &mpsc::Sender<AudioChunk>,
-) {
-    if data.is_empty() { return; }
-    let pcm_data = resample(data, sample_rate, TARGET_SAMPLE_RATE, channels);
-    let ts = current_timestamp_ms();
-
-    // Emit as Mic
-    let _ = tx.try_send(AudioChunk {
-        pcm_data: pcm_data.clone(),
-        source: AudioSource::Mic,
-        timestamp_ms: ts,
-        is_speech: false,
-    });
-    // Emit as System
-    let _ = tx.try_send(AudioChunk {
-        pcm_data,
-        source: AudioSource::System,
-        timestamp_ms: ts,
-        is_speech: false,
-    });
+/// CPAL may select integer or floating PCM formats as the device default.
+/// Share conversion between microphone and Windows output-device loopback.
+pub(crate) fn build_pcm_stream(
+    device: &cpal::Device,
+    config: cpal::SupportedStreamConfig,
+    mut on_data: impl FnMut(&[i16]) + Send + 'static,
+) -> Result<Stream, String> {
+    macro_rules! capture {
+        ($sample:ty) => {
+            device.build_input_stream(config.into(), move |data: &[$sample], _: &cpal::InputCallbackInfo| {
+                let pcm = to_pcm16(data);
+                on_data(&pcm);
+            }, |error| log::error!("Audio stream failed: {error}"), None)
+        };
+    }
+    let stream = match config.sample_format() {
+        SampleFormat::I8 => capture!(i8),
+        SampleFormat::I16 => capture!(i16),
+        SampleFormat::I24 => capture!(cpal::I24),
+        SampleFormat::I32 => capture!(i32),
+        SampleFormat::I64 => capture!(i64),
+        SampleFormat::U8 => capture!(u8),
+        SampleFormat::U16 => capture!(u16),
+        SampleFormat::U24 => capture!(cpal::U24),
+        SampleFormat::U32 => capture!(u32),
+        SampleFormat::U64 => capture!(u64),
+        SampleFormat::F32 => capture!(f32),
+        SampleFormat::F64 => capture!(f64),
+        format => return Err(format!("Unsupported audio format: {format:?}")),
+    };
+    stream.map_err(|e| format!("Build audio stream: {e}"))
 }
 
-fn handle_dual_data_f32(
-    data: &[f32],
-    sample_rate: u32,
-    channels: u16,
-    tx: &mpsc::Sender<AudioChunk>,
-) {
-    if data.is_empty() { return; }
-    let i16_data: Vec<i16> = data
-        .iter()
-        .map(|&s| (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)
-        .collect();
-    let pcm_data = resample(&i16_data, sample_rate, TARGET_SAMPLE_RATE, channels);
-    let ts = current_timestamp_ms();
+fn to_pcm16<T: cpal::Sample>(data: &[T]) -> Vec<i16>
+where f64: cpal::FromSample<T> {
+    data.iter().map(|sample| {
+        let value = sample.to_sample::<f64>();
+        // Saturate out-of-range floating input; NaN becomes silence.
+        if value.is_nan() { 0 } else { (value.clamp(-1.0, 1.0) * 32768.0) as i16 }
+    }).collect()
+}
 
-    let _ = tx.try_send(AudioChunk {
-        pcm_data: pcm_data.clone(),
-        source: AudioSource::Mic,
-        timestamp_ms: ts,
-        is_speech: false,
-    });
-    let _ = tx.try_send(AudioChunk {
-        pcm_data,
-        source: AudioSource::System,
-        timestamp_ms: ts,
-        is_speech: false,
-    });
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn capture_formats_preserve_silence_polarity_and_saturation() {
+        assert_eq!(to_pcm16(&[i16::MIN, -1, 0, 1, i16::MAX]), vec![i16::MIN, -1, 0, 1, i16::MAX]);
+        assert_eq!(to_pcm16(&[0_u16, 32768, 65535]), vec![i16::MIN, 0, i16::MAX]);
+        assert_eq!(to_pcm16(&[i32::MIN, 0, i32::MAX]), vec![i16::MIN, 0, i16::MAX]);
+        assert_eq!(to_pcm16(&[-2.0_f32, 0.0, 0.5, 2.0, f32::NAN]), vec![i16::MIN, 0, 16384, i16::MAX, 0]);
+        assert_eq!(to_pcm16(&[cpal::I24::new(-8388608).unwrap(), cpal::I24::new(0).unwrap(), cpal::I24::new(8388607).unwrap()]), vec![i16::MIN, 0, i16::MAX]);
+    }
 }
 
 fn current_timestamp_ms() -> u64 {
@@ -248,68 +135,6 @@ fn handle_mic_data_i16(
     };
 
     // Non-blocking send — drop chunk if channel is full
-    if tx.try_send(chunk).is_err() {
-        log::trace!("Mic audio channel full, dropping chunk");
-    }
-}
-
-fn handle_mic_data_f32(
-    data: &[f32],
-    sample_rate: u32,
-    channels: u16,
-    tx: &mpsc::Sender<AudioChunk>,
-    source: &AudioSource,
-) {
-    if data.is_empty() {
-        return;
-    }
-
-    // Convert f32 [-1.0, 1.0] to i16
-    let i16_data: Vec<i16> = data
-        .iter()
-        .map(|&s| (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)
-        .collect();
-
-    let pcm_data = resample(&i16_data, sample_rate, TARGET_SAMPLE_RATE, channels);
-
-    let chunk = AudioChunk {
-        pcm_data,
-        source: source.clone(),
-        timestamp_ms: current_timestamp_ms(),
-        is_speech: false,
-    };
-
-    if tx.try_send(chunk).is_err() {
-        log::trace!("Mic audio channel full, dropping chunk");
-    }
-}
-
-fn handle_mic_data_u16(
-    data: &[u16],
-    sample_rate: u32,
-    channels: u16,
-    tx: &mpsc::Sender<AudioChunk>,
-    source: &AudioSource,
-) {
-    if data.is_empty() {
-        return;
-    }
-
-    // Convert u16 [0, 65535] to i16 [-32768, 32767]
-    let i16_data: Vec<i16> = data
-        .iter()
-        .map(|&s| (s as i32 - 32768) as i16)
-        .collect();
-
-    let pcm_data = resample(&i16_data, sample_rate, TARGET_SAMPLE_RATE, channels);
-
-    let chunk = AudioChunk {
-        pcm_data,
-        source: source.clone(),
-        timestamp_ms: current_timestamp_ms(),
-        is_speech: false,
-    };
-
     if tx.try_send(chunk).is_err() {
         log::trace!("Mic audio channel full, dropping chunk");
     }

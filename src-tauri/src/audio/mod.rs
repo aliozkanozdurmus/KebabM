@@ -140,7 +140,7 @@ impl AudioCaptureManager {
         log::info!("Starting audio capture pipeline");
 
         // Reset stop flag
-        self.stop_flag.store(false, Ordering::SeqCst);
+        self.stop_flag = Arc::new(AtomicBool::new(false));
 
         // Same-device optimization: when both parties use the same input device,
         // open ONE capture and duplicate chunks with both Mic + System tags.
@@ -194,10 +194,8 @@ impl AudioCaptureManager {
                     log::info!("System audio capture started via input device (tagged as System)");
                 }
                 Err(e) => {
-                    log::error!(
-                        "Failed to start system input capture: {}. System audio will not be captured.",
-                        e
-                    );
+                    self.mic_stream.take();
+                    return Err(format!("Remote-party audio failed: {e}"));
                 }
             }
         } else {
@@ -215,10 +213,8 @@ impl AudioCaptureManager {
                     log::info!("System audio capture started via WASAPI loopback");
                 }
                 Err(e) => {
-                    log::error!(
-                        "WASAPI loopback failed: {}. System audio (remote party) will not be captured.",
-                        e
-                    );
+                    self.mic_stream.take();
+                    return Err(format!("System audio failed: {e}"));
                 }
             }
         }
@@ -374,7 +370,7 @@ impl AudioCaptureManager {
             log::info!("Audio test started for input device: {}", device_id);
         } else {
             // For output devices, use WASAPI loopback on the selected device
-            self.test_stop_flag.store(false, Ordering::SeqCst);
+            self.test_stop_flag = Arc::new(AtomicBool::new(false));
             let stop_flag = Arc::clone(&self.test_stop_flag);
             let dev_name = if device_id.is_empty() || device_id == "default" {
                 None

@@ -8,6 +8,7 @@ pub mod ollama;
 pub mod openai_compat;
 pub mod openrouter_models;
 pub mod provider;
+pub mod request;
 pub mod stream_parser;
 
 use provider::{LLMError, LLMProvider};
@@ -231,7 +232,7 @@ pub struct ProviderInfo {
 
 /// Routes to active LLM provider, supports hot-switching and cancellation.
 pub struct LLMRouter {
-    active_provider: Option<Arc<TokioMutex<Box<dyn LLMProvider>>>>,
+    active_provider: Option<Arc<dyn LLMProvider>>,
     active_model: String,
     active_provider_type: Option<ProviderType>,
     cancel_token: Arc<TokioMutex<bool>>,
@@ -380,13 +381,13 @@ impl LLMRouter {
             }
         };
 
-        self.active_provider = Some(Arc::new(TokioMutex::new(provider)));
+        self.active_provider = Some(Arc::from(provider));
         self.active_provider_type = Some(provider_type);
         Ok(())
     }
 
     /// Get a reference to the active provider (behind a tokio mutex for async access).
-    pub fn get_provider(&self) -> Result<Arc<TokioMutex<Box<dyn LLMProvider>>>, LLMError> {
+    pub fn get_provider(&self) -> Result<Arc<dyn LLMProvider>, LLMError> {
         self.active_provider
             .clone()
             .ok_or_else(|| LLMError::NotConfigured("No LLM provider configured".to_string()))

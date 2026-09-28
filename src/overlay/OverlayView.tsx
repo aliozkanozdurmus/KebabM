@@ -1,3 +1,4 @@
+import { BrandMark } from "../components/BrandMark";
 import { useCallback, useMemo, useState } from "react";
 import { useMeetingStore } from "../stores/meetingStore";
 import { useScenarioStore } from "../stores/scenarioStore";
@@ -58,7 +59,7 @@ export function OverlayView() {
   const [devLogOpen, setDevLogOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [bookmarksOpen, setBookmarksOpen] = useState(false);
-  const [layoutMode, setLayoutMode] = useState<"split" | "ai" | "transcript">("split");
+  const [layoutMode, setLayoutMode] = useState<"split" | "ai" | "transcript">("ai");
   const cycleLayout = () => setLayoutMode((m) => m === "split" ? "ai" : m === "ai" ? "transcript" : "split");
   const toggleLog = useCallLogStore((s) => s.toggleOpen);
   const logOpen = useCallLogStore((s) => s.isOpen);
@@ -146,19 +147,19 @@ export function OverlayView() {
     showLauncherWindow().catch(() => {});
   }, [setCurrentView]);
 
-  const meetingTitle = activeMeeting?.title || "zaiqoM";
+  const meetingTitle = activeMeeting?.title || "ZaiqoM-MeetingHelper";
 
   return (
-    <div className="overlay-bg flex h-full flex-col border border-[hsl(var(--border))]" style={{ background: `hsl(var(--background) / ${overlayOpacity})`, boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }}>
+    <div className="app-surface overlay-bg flex h-full flex-col border border-[hsl(var(--border))]" style={{ background: `hsl(var(--background) / ${overlayOpacity})`, boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }}>
 
       {/* ═══ HEADER ═══ */}
       <div
-        className="no-select flex shrink-0 flex-col gap-1 px-3 py-2 cursor-move"
+        className="glass-surface no-select flex shrink-0 flex-col gap-1 px-3 py-2 cursor-move"
         data-tauri-drag-region
         style={{ borderBottom: "1px solid hsl(var(--border) / 0.12)" }}
       >
         <div className="flex w-full min-w-0 items-center gap-2" data-tauri-drag-region>
-          <GripHorizontal className="h-3 w-3 text-muted-foreground/40" />
+          <BrandMark decorative className="h-5 w-5" />
           <span className="text-xs font-semibold text-foreground/90 truncate max-w-[160px]" title={meetingTitle}>
             {meetingTitle}
           </span>
@@ -196,7 +197,7 @@ export function OverlayView() {
           </button>
         </div>
 
-        <div className="flex w-full flex-nowrap items-center gap-1 overflow-x-auto">
+        <div className="flex w-full flex-wrap items-center gap-1">
           {/* Mute controls */}
           <HeaderBtn
             icon={mutedYou ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}
@@ -215,10 +216,13 @@ export function OverlayView() {
           <div className="w-px h-3.5 bg-border/20 mx-0.5" />
           <HeaderBtn
             icon={layoutMode === "split" ? <Columns2 className="h-3.5 w-3.5" /> : layoutMode === "ai" ? <PanelLeftClose className="h-3.5 w-3.5" /> : <PanelRightClose className="h-3.5 w-3.5" />}
-            label="Layout"
+            label={layoutMode === "ai" ? "Transcript" : "Layout"}
             onClick={cycleLayout}
             tooltip={layoutMode === "split" ? "Show only the answer panel." : layoutMode === "ai" ? "Show only the transcript." : "Show the transcript and the answer side by side."}
           />
+          <details className="relative">
+            <summary className="cursor-pointer rounded-md px-2 py-1 text-xs hover:bg-accent">More</summary>
+            <div className="absolute right-0 top-8 z-50 flex w-48 flex-col gap-1 rounded-md border border-border bg-background p-2 shadow-lg">
           <HeaderBtn icon={<BarChart3 className="h-3.5 w-3.5" />} label="Speakers" active={statsOpen} onClick={() => setStatsOpen(p => !p)} tooltip="Who has been talking, and for how long." />
           <HeaderBtn icon={<Bookmark className="h-3.5 w-3.5" />} label="Marks" active={bookmarksOpen} onClick={() => setBookmarksOpen(p => !p)} tooltip="Save a moment in this meeting so you can jump back to it." />
           <HeaderBtn icon={<Activity className="h-3.5 w-3.5" />} label="Calls" active={logOpen} onClick={toggleLog} tooltip="The questions sent to the assistant and the answers it gave." />
@@ -226,6 +230,8 @@ export function OverlayView() {
           <HeaderBtn icon={<Eye className="h-3.5 w-3.5" />} label="Opacity" onClick={cycleOpacity} tooltip={`Window is ${Math.round(overlayOpacity * 100)}% solid. Click to make it more or less see-through.`} />
           <HeaderBtn icon={<Settings className="h-3.5 w-3.5" />} label="Settings" onClick={() => setCurrentView("settings")} tooltip="Open settings without ending the meeting." />
           <HeaderBtn icon={<Minus className="h-3.5 w-3.5" />} label="Home" onClick={handleMinimizeToDashboard} tooltip="Go back to the project list. The meeting keeps running." />
+            </div>
+          </details>
           <label className="ml-1 flex items-center gap-1 text-[11px] text-muted-foreground" title="Speech recognition language. Changing it restarts listening with the new language.">
             <span>Language</span>
             <select

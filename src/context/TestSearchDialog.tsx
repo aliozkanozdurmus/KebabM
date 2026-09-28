@@ -2,8 +2,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRagStore } from "../stores/ragStore";
 import { useConfigStore } from "../stores/configStore";
 import { testRagAnswer } from "../lib/ipc";
-import { onStreamStart, onStreamToken, onStreamEnd, onStreamError } from "../lib/events";
-import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   X,
   Search,
@@ -93,54 +91,6 @@ export function TestSearchDialog({ isOpen, onClose }: TestSearchDialogProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, onClose]);
 
-  // Subscribe to LLM stream events when generating
-  useEffect(() => {
-    if (!isGenerating) return;
-
-    let unlistenStart: UnlistenFn | null = null;
-    let unlistenToken: UnlistenFn | null = null;
-    let unlistenEnd: UnlistenFn | null = null;
-    let unlistenError: UnlistenFn | null = null;
-    let mounted = true;
-
-    const setup = async () => {
-      unlistenStart = await onStreamStart((event) => {
-        if (!mounted) return;
-        setAiModel(event.model);
-        setAiProvider(event.provider);
-        // Scroll to AI response box so user sees the answer, not the chunk list
-        setTimeout(() => {
-          aiResponseRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 50);
-      });
-      unlistenToken = await onStreamToken((event) => {
-        if (!mounted) return;
-        setAiResponse((prev) => prev + event.token);
-      });
-      unlistenEnd = await onStreamEnd((event) => {
-        if (!mounted) return;
-        setIsGenerating(false);
-        setAiLatencyMs(event.latency_ms);
-        setAiTotalTokens(event.total_tokens);
-      });
-      unlistenError = await onStreamError((errorMsg) => {
-        if (!mounted) return;
-        setIsGenerating(false);
-        setAiError(errorMsg);
-      });
-    };
-
-    setup();
-
-    return () => {
-      mounted = false;
-      if (unlistenStart) unlistenStart();
-      if (unlistenToken) unlistenToken();
-      if (unlistenEnd) unlistenEnd();
-      if (unlistenError) unlistenError();
-    };
-  }, [isGenerating]);
-
   const handleBackdropClick = useCallback(
     (e: React.MouseEvent) => {
       if (e.target === backdropRef.current) onClose();
@@ -167,12 +117,18 @@ export function TestSearchDialog({ isOpen, onClose }: TestSearchDialogProps) {
     setIsGenerating(true);
     aiStartTime.current = performance.now();
     try {
-      await testRagAnswer(trimmed, llmProvider, llmModel);
+      const result = await testRagAnswer(trimmed, llmProvider, llmModel);
+      setAiResponse(result.text);
+      setAiModel(result.model);
+      setAiProvider(result.provider);
+      setAiLatencyMs(result.stats.latency_ms);
+      setAiTotalTokens(result.stats.total_tokens);
+      setIsGenerating(false);
     } catch (e) {
       setIsGenerating(false);
       setAiError(e instanceof Error ? e.message : String(e));
     }
-  }, [testSearch]);
+  }, [testSearch, llmProvider, llmModel]);
 
   const handleSearch = useCallback(() => {
     handleFullTest(query);

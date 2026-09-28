@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listProjects, setActiveProject, type ProjectRecord } from "../lib/ipc";
+import { ReadinessChecks } from "./ReadinessChecks";
 import { Play, X } from "lucide-react";
 
 const GENERAL = "general";
@@ -15,6 +16,7 @@ export function MeetingSetupModal({ open, onStart, onCancel }: MeetingSetupModal
   const [selectedId, setSelectedId] = useState<string>(GENERAL);
   const [context, setContext] = useState("");
   const [starting, setStarting] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (!open) return;
@@ -49,7 +51,7 @@ export function MeetingSetupModal({ open, onStart, onCancel }: MeetingSetupModal
         await setActiveProject(selectedId);
         onStart({ projectId: selectedId });
       }
-    } finally {
+    } catch (e) { setError(String(e)); } finally {
       setStarting(false);
     }
   };
@@ -64,7 +66,7 @@ export function MeetingSetupModal({ open, onStart, onCancel }: MeetingSetupModal
         if (event.target === event.currentTarget) onCancel();
       }}
     >
-      <div className="w-[440px] border border-border bg-card">
+      <div className="w-[480px] max-w-[calc(100vw-32px)] max-h-[92vh] overflow-auto border border-border bg-card">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold text-foreground">Start meeting</h2>
@@ -74,7 +76,7 @@ export function MeetingSetupModal({ open, onStart, onCancel }: MeetingSetupModal
             <X className="h-4 w-4" />
           </button>
         </div>
-        <div className="max-h-80 space-y-1 overflow-y-auto px-3 py-3">
+        <div className="max-h-60 space-y-1 overflow-y-auto px-3 py-3">
           <button
             onClick={() => setSelectedId(GENERAL)}
             className={`block w-full border px-3 py-2 text-left cursor-pointer ${selectedId === GENERAL ? "border-[#0f62fe] bg-[#0f62fe] text-white" : "border-border text-foreground"}`}
@@ -102,12 +104,14 @@ export function MeetingSetupModal({ open, onStart, onCancel }: MeetingSetupModal
                 <div className="text-sm">{project.name}</div>
                 <div className={`truncate text-xs ${selected ? "text-white/80" : "text-muted-foreground"}`}>{project.root_path}</div>
                 <div className={`text-xs ${selected ? "text-white/80" : "text-muted-foreground"}`}>
-                  {project.brief ? "Knowledge base ready" : "Knowledge base not written yet"}
+                  {project.scanned_at ? "Index available · check freshness below" : "No source index yet"}
                 </div>
               </button>
             );
           })}
         </div>
+        <ReadinessChecks key={selectedId} projectId={selectedId === GENERAL ? undefined : selectedId} />
+        {error && <p role="alert" className="px-3 text-xs text-destructive">{error}</p>}
         <div className="flex gap-2 border-t border-border px-3 py-3">
           <button
             onClick={start}

@@ -3,6 +3,7 @@ import type { UpdateInfo } from "../lib/types";
 
 export type UpdateCheckStatus =
   | "idle"
+  | "disabled"
   | "checking"
   | "up-to-date"
   | "available"
@@ -54,12 +55,12 @@ export const useUpdaterStore = create<UpdaterState>((set) => ({
   skippedVersion: null,
 
   setCheckStatus: (status) =>
-    set(() => ({
+    set((state) => ({
       checkStatus: status,
       lastChecked:
         status === "up-to-date" || status === "available"
           ? Date.now()
-          : undefined,
+          : state.lastChecked,
     })),
 
   setAvailableUpdate: (update) =>

@@ -23,7 +23,7 @@ const INTERROGATIVE_STARTERS: &[&str] = &[
     "what", "why", "how", "when", "where", "who", "which",
     "can", "could", "would", "should",
     "do", "does", "is", "are", "will", "have", "has",
-    "tell",
+    "tell", "explain", "nasıl", "neden", "niçin", "hangi", "kim", "nerede", "ne", "comment", "pourquoi", "quel", "quelle",
 ];
 
 /// Interview-specific patterns that indicate a question or prompt.
@@ -96,6 +96,10 @@ impl QuestionDetector {
                 }
             }
 
+            // Word boundaries avoid matching syllables inside unrelated Turkish words.
+            if lower.split_whitespace().any(|w| ["nasıl", "neden", "nereden", "nerede", "hangi", "mı", "mi", "mu", "mü"].contains(&w.trim_matches(|c: char| !c.is_alphabetic()))) {
+                confidence = confidence.max(0.75);
+            }
             // Only include if confidence is above threshold
             if confidence >= 0.5 {
                 questions.push(DetectedQuestion {

@@ -1,0 +1,120 @@
+name: Desktop packages
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      signed:
+        description: Build signed updater artifacts (requires release secrets)
+        type: boolean
+        default: false
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            bundles: app,dmg
+          - os: windows-latest
+            bundles: nsis
+          - os: ubuntu-22.04
+            bundles: appimage,deb
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    env:
+      CI: true
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+      TAURI_UPDATER_ENDPOINT: ${{ vars.TAURI_UPDATER_ENDPOINT }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - name: macOS native prerequisites
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          brew install cmake ninja || brew upgrade cmake ninja
+          echo "LIBCLANG_PATH=$(xcode-select -p)/Toolchains/XcodeDefault.xctoolchain/usr/lib" >> "$GITHUB_ENV"
+      - name: Linux native prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libasound2-dev libpulse-dev libssl-dev libclang-dev clang cmake ninja-build libfuse2
+      - name: Windows native prerequisites
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install llvm ninja -y --no-progress
+          "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm run check
+      - run: cargo test --release --locked --manifest-path src-tauri/Cargo.toml
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - if: inputs.signed
+        run: npm run release:config
+      - if: inputs.signed
+        run: npm run tauri -- build --bundles ${{ matrix.bundles }} --config src-tauri/updater.generated.json
+      - if: ${{ !inputs.signed }}
+        run: npm run tauri -- build --bundles ${{ matrix.bundles }}
+      - name: Collect installers
+        run: node scripts/collect-installers.mjs
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: desktop-${{ matrix.os }}-${{ github.sha }}
+          path: release-artifacts/installers/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
+          path: release-artifacts/installers
+          merge-multiple: true
+      - name: Verify complete release and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RELEASE_TAG" = "v$(node -p 'require("./package.json").version')"
+          cd release-artifacts/installers
+          test "$(find . -maxdepth 1 -name '*.exe' | wc -l)" -eq 1
+          test "$(find . -maxdepth 1 -name '*.dmg' | wc -l)" -eq 1
+          test "$(find . -maxdepth 1 -name '*.AppImage' | wc -l)" -eq 1
+          test "$(find . -maxdepth 1 -name '*.deb' | wc -l)" -eq 1
+          sha256sum *.exe *.dmg *.AppImage *.deb > SHA256SUMS.txt
+          gh release create "$RELEASE_TAG" --verify-tag --draft --title "ZaiqoM-MeetingHelper $RELEASE_TAG" --notes-file ../../docs/releases/v1.0.0.md
+          gh release upload "$RELEASE_TAG" *.exe *.dmg *.AppImage *.deb SHA256SUMS.txt
+          gh release edit "$RELEASE_TAG" --draft=false --latest

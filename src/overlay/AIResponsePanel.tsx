@@ -1,421 +1,94 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { readingColor } from "../lib/readingColor";
+import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { Check, Copy, Loader2, Pin, X } from "lucide-react";
 import { useStreamStore } from "../stores/streamStore";
-import {
-  Sparkles,
-  Loader2,
-  Pin,
-  PinOff,
-  Copy,
-  Check,
-  Globe,
-} from "lucide-react";
-import { generateAssist } from "../lib/ipc";
+import { useConfigStore } from "../stores/configStore";
+import { cancelGeneration, generateAssist } from "../lib/ipc";
+import { showToast } from "../stores/toastStore";
 import { AnswerMarkdown } from "./AnswerMarkdown";
 import { splitFollowUps } from "./followUps";
-import { getModeLabel } from "../lib/utils";
-import type { AIResponse, StreamSource } from "../lib/types";
-import { useConfigStore } from "../stores/configStore";
 import { ColorPickerButton } from "../components/ColorPickerButton";
+import type { EvidenceRef } from "../lib/types";
+import { costScope, estimateAnswerCost } from "../lib/usage";
 
-type TabId = "current" | "history-0" | "history-1" | string;
+const button = "rounded-md border border-border px-2.5 py-1.5 text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50";
 
-// Sub-PRD 6: Streaming markdown, response history tabs, pin/copy
 export function AIResponsePanel() {
-  const isStreaming = useStreamStore((s) => s.isStreaming);
-  const currentContent = useStreamStore((s) => s.currentContent);
-  const currentMode = useStreamStore((s) => s.currentMode);
-  const error = useStreamStore((s) => s.error);
-  const currentSources = useStreamStore((s) => s.currentSources);
-  const responseHistory = useStreamStore((s) => s.responseHistory);
-  const pinnedResponses = useStreamStore((s) => s.pinnedResponses);
-  const pinResponse = useStreamStore((s) => s.pinResponse);
-  const unpinResponse = useStreamStore((s) => s.unpinResponse);
-
-  const aiResponseFontSize = useConfigStore((s) => s.aiResponseFontSize ?? 12);
-  const aiResponseTextColor = useConfigStore((s) => s.aiResponseTextColor ?? "#d4d4d8");
-  const aiResponseLineHeight = useConfigStore((s) => s.aiResponseLineHeight ?? 1.6);
-  const aiResponseHPad = useConfigStore((s) => s.aiResponseHPad ?? 0);
-  const aiResponseAlign = useConfigStore((s) => s.aiResponseAlign ?? "left");
-  const setAiResponseFontSize = useConfigStore((s) => s.setAiResponseFontSize);
-  const setAiResponseTextColor = useConfigStore((s) => s.setAiResponseTextColor);
-  const setAiResponseLineHeight = useConfigStore((s) => s.setAiResponseLineHeight);
-  const setAiResponseHPad = useConfigStore((s) => s.setAiResponseHPad);
-  const setAiResponseAlign = useConfigStore((s) => s.setAiResponseAlign);
-
-  const proseStyle = {
-    fontSize: `${aiResponseFontSize}px`,
-    color: aiResponseTextColor,
-    lineHeight: aiResponseLineHeight,
-    paddingLeft: `${aiResponseHPad}px`,
-    paddingRight: `${aiResponseHPad}px`,
-    textAlign: aiResponseAlign as React.CSSProperties["textAlign"],
+  const stream = useStreamStore();
+  const config = useConfigStore();
+  // Stable response IDs keep the answer being read in place when another completes.
+  const [selected, setSelected] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [source, setSource] = useState<{ ref: EvidenceRef; text: string } | null>(null);
+  const [sourceError, setSourceError] = useState("");
+  const [loadingSource, setLoadingSource] = useState(false);
+  const latest = stream.responseHistory[0];
+  useEffect(() => { if (!selected && latest && !stream.isStreaming) setSelected(latest.id); }, [latest, selected, stream.isStreaming]);
+  const response = [...stream.responseHistory, ...stream.pinnedResponses].find(r => r.id === selected);
+  const content = response?.content ?? stream.currentContent;
+  const evidence = response?.evidence ?? stream.currentEvidence;
+  const question = response?.question ?? stream.currentQuestion;
+  const follow = splitFollowUps(content);
+  const [brief, ...detail] = follow.body.split(/\n(?=## (?:Detail|Details|Detay|Ayrıntı))/i);
+  const isReadingLive = !response;
+  const estimatedCost = response && estimateAnswerCost(response.provider, response.model, response.promptTokens, response.completionTokens);
+  const act = (mode: string, text: string) => {
+    generateAssist(mode, text, ["Shorten", "FollowUp"].includes(mode) ? evidence : undefined).catch(e => showToast(String(e), "error"));
   };
-
-  const [activeTab, setActiveTab] = useState<TabId>("current");
-  const [copiedId, setCopiedId] = useState<string | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Auto-scroll during streaming
-  useEffect(() => {
-    if (isStreaming && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [currentContent, isStreaming]);
-
-  // Switch to "current" tab when a new stream starts
-  useEffect(() => {
-    if (isStreaming) {
-      setActiveTab("current");
-    }
-  }, [isStreaming]);
-
-  const handleCopy = useCallback(
-    async (content: string, id: string) => {
-      try {
-        await navigator.clipboard.writeText(content);
-        setCopiedId(id);
-        setTimeout(() => setCopiedId(null), 2000);
-      } catch {
-        // Clipboard access may fail in some contexts
-      }
-    },
-    []
-  );
-
-  const handlePin = useCallback(
-    (id: string) => {
-      const isPinned = pinnedResponses.some((r) => r.id === id);
-      if (isPinned) {
-        unpinResponse(id);
-      } else {
-        pinResponse(id);
-      }
-    },
-    [pinnedResponses, pinResponse, unpinResponse]
-  );
-
-  // Build tab list: Current + previous history + pinned
-  const previousResponses = responseHistory.slice(0, 4);
-  const hasTabs =
-    previousResponses.length > 0 || pinnedResponses.length > 0;
-
-  // Error state
-  if (error) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2">
-        <p className="text-xs text-destructive/70">{error}</p>
-      </div>
-    );
-  }
-
-  // Determine what content to show based on active tab
-  let displayContent: string | null = null;
-  let displayResponse: AIResponse | null = null;
-
-  if (activeTab === "current") {
-    displayContent = currentContent || null;
-  } else if (activeTab.startsWith("history-")) {
-    const idx = parseInt(activeTab.replace("history-", ""), 10);
-    displayResponse = previousResponses[idx] || null;
-    displayContent = displayResponse?.content || null;
-  } else if (activeTab.startsWith("pinned-")) {
-    const pinnedId = activeTab.replace("pinned-", "");
-    displayResponse = pinnedResponses.find((r) => r.id === pinnedId) || null;
-    displayContent = displayResponse?.content || null;
-  }
-
-  return (
-    <div className="flex flex-1 min-h-0 flex-col">
-      {/* Tabs row */}
-      {hasTabs && (
-        <div className="mb-2 flex shrink-0 items-center gap-1.5 overflow-x-auto pb-1.5" role="tablist" aria-label="AI response tabs">
-          <TabButton
-            label="Current"
-            active={activeTab === "current"}
-            onClick={() => setActiveTab("current")}
-          />
-          {previousResponses.map((resp, idx) => (
-            <TabButton
-              key={resp.id}
-              label={getModeLabel(resp.mode)}
-              active={activeTab === `history-${idx}`}
-              onClick={() => setActiveTab(`history-${idx}`)}
-              secondary
-            />
-          ))}
-          {pinnedResponses.map((resp) => (
-            <TabButton
-              key={resp.id}
-              label={`${getModeLabel(resp.mode)}`}
-              active={activeTab === `pinned-${resp.id}`}
-              onClick={() => setActiveTab(`pinned-${resp.id}`)}
-              pinned
-            />
-          ))}
-        </div>
-      )}
-
-      {/* Content area */}
-      <div className="relative flex-1 min-h-0">
-      <div ref={scrollRef} className="absolute inset-0 overflow-y-auto" role="tabpanel" aria-label="AI response content">
-        {/* Active streaming state */}
-        {activeTab === "current" && isStreaming && (
-          <div className="space-y-2.5" aria-live="polite" aria-atomic="false">
-            <div className="flex items-center gap-2">
-              <Loader2 className="h-3 w-3 animate-spin text-primary/50" />
-              <span className="text-meta font-medium text-primary">
-                {currentMode ? getModeLabel(currentMode) : "Generating"}...
-              </span>
-            </div>
-            <div className="prose prose-sm prose-invert max-w-none leading-relaxed" style={proseStyle}>
-              <AnswerMarkdown content={currentContent} />
-              <span className="inline-block h-3 w-0.5 animate-pulse bg-primary/60 ml-0.5" />
-            </div>
-          </div>
-        )}
-
-        {/* Finished current content (not streaming) */}
-        {activeTab === "current" && !isStreaming && currentContent && (
-          <div className="space-y-2.5">
-            {currentMode && (
-              <div className="flex items-center justify-between">
-                <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-meta font-medium text-primary/80">
-                  {getModeLabel(currentMode)}
-                </span>
-                <div className="flex items-center gap-1">
-                  <ActionButton
-                    icon={copiedId === "current" ? Check : Copy}
-                    title="Copy to clipboard"
-                    onClick={() => handleCopy(currentContent, "current")}
-                    active={copiedId === "current"}
-                  />
-                  {responseHistory.length > 0 && responseHistory[0] && (
-                    <ActionButton
-                      icon={
-                        pinnedResponses.some(
-                          (r) => r.id === responseHistory[0].id
-                        )
-                          ? PinOff
-                          : Pin
-                      }
-                      title={
-                        pinnedResponses.some(
-                          (r) => r.id === responseHistory[0].id
-                        )
-                          ? "Unpin"
-                          : "Pin response"
-                      }
-                      onClick={() => handlePin(responseHistory[0].id)}
-                    />
-                  )}
-                </div>
-              </div>
-            )}
-            <div className="prose prose-sm prose-invert max-w-none leading-relaxed" style={proseStyle}>
-              <AnswerMarkdown content={splitFollowUps(currentContent).body} />
-            </div>
-            <FollowUps questions={splitFollowUps(currentContent).questions} />
-            <SourcesList sources={currentSources} />
-          </div>
-        )}
-
-        {/* History / pinned tab content */}
-        {activeTab !== "current" && displayContent && displayResponse && (
-          <div className="space-y-2.5">
-            <div className="flex items-center justify-between">
-              <span className="rounded-full bg-primary/10 px-2.5 py-0.5 text-meta font-medium text-primary/80">
-                {getModeLabel(displayResponse.mode)}
-              </span>
-              <div className="flex items-center gap-1">
-                <ActionButton
-                  icon={copiedId === displayResponse.id ? Check : Copy}
-                  title="Copy to clipboard"
-                  onClick={() =>
-                    handleCopy(displayContent!, displayResponse!.id)
-                  }
-                  active={copiedId === displayResponse.id}
-                />
-                <ActionButton
-                  icon={
-                    pinnedResponses.some((r) => r.id === displayResponse!.id)
-                      ? PinOff
-                      : Pin
-                  }
-                  title={
-                    pinnedResponses.some((r) => r.id === displayResponse!.id)
-                      ? "Unpin"
-                      : "Pin response"
-                  }
-                  onClick={() => handlePin(displayResponse!.id)}
-                />
-              </div>
-            </div>
-            <div className="prose prose-sm prose-invert max-w-none leading-relaxed" style={proseStyle}>
-              <AnswerMarkdown content={splitFollowUps(displayContent).body} />
-            </div>
-            <FollowUps questions={splitFollowUps(displayContent).questions} />
-            <SourcesList sources={displayResponse.sources} />
-          </div>
-        )}
-
-        {/* Empty state */}
-        {activeTab === "current" && !isStreaming && !currentContent && (
-          <div className="flex h-full flex-col items-center justify-center gap-2">
-            <Sparkles className="h-5 w-5 text-primary/30" />
-            <p className="text-xs text-muted-foreground/50">
-              Press <kbd className="mx-0.5 rounded border border-border/30 bg-secondary/30 px-1.5 py-0.5 font-mono text-meta text-foreground/70">Space</kbd> for AI assistance
-            </p>
-          </div>
-        )}
-      </div>
-      </div>
-
-      {/* Typeset controls */}
-      <div className="flex shrink-0 flex-col gap-1 border-t border-border/10 px-1 pt-1.5">
-        {/* Row 1: font size + color */}
-        <div className="flex items-center gap-3">
-          <span className="text-[0.6rem] uppercase tracking-widest text-muted-foreground/40 font-medium">AI Text</span>
-          <div className="flex items-center gap-1">
-            <button onClick={() => setAiResponseFontSize(Math.max(8, aiResponseFontSize - 1))} className="h-5 w-5 flex items-center justify-center rounded text-[0.6rem] text-muted-foreground/50 hover:bg-accent/40 hover:text-foreground/70 transition-colors" title="Smaller">A</button>
-            <span className="text-[0.6rem] tabular-nums text-muted-foreground/50 w-6 text-center">{aiResponseFontSize}</span>
-            <button onClick={() => setAiResponseFontSize(Math.min(32, aiResponseFontSize + 1))} className="h-5 w-5 flex items-center justify-center rounded text-[0.75rem] font-medium text-muted-foreground/50 hover:bg-accent/40 hover:text-foreground/70 transition-colors" title="Larger">A</button>
-          </div>
-          <ColorPickerButton value={aiResponseTextColor} onChange={setAiResponseTextColor} label="AI text color" />
-        </div>
-        {/* Row 2: line height + horizontal padding + text align */}
-        <div className="flex items-center gap-3">
-          {/* Line height */}
-          <div className="flex items-center gap-1">
-            <span className="text-[0.6rem] text-muted-foreground/40">LH</span>
-            <button onClick={() => setAiResponseLineHeight(Math.max(1.0, parseFloat((aiResponseLineHeight - 0.1).toFixed(1))))} className="h-5 w-5 flex items-center justify-center rounded text-[0.65rem] text-muted-foreground/50 hover:bg-accent/40 hover:text-foreground/70 transition-colors" title="Decrease line height">−</button>
-            <span className="text-[0.6rem] tabular-nums text-muted-foreground/50 w-6 text-center">{aiResponseLineHeight.toFixed(1)}</span>
-            <button onClick={() => setAiResponseLineHeight(Math.min(3.0, parseFloat((aiResponseLineHeight + 0.1).toFixed(1))))} className="h-5 w-5 flex items-center justify-center rounded text-[0.65rem] text-muted-foreground/50 hover:bg-accent/40 hover:text-foreground/70 transition-colors" title="Increase line height">+</button>
-          </div>
-          {/* Horizontal padding */}
-          <div className="flex items-center gap-1">
-            <span className="text-[0.6rem] text-muted-foreground/40">↔</span>
-            <button onClick={() => setAiResponseHPad(Math.max(0, aiResponseHPad - 4))} className="h-5 w-5 flex items-center justify-center rounded text-[0.65rem] text-muted-foreground/50 hover:bg-accent/40 hover:text-foreground/70 transition-colors" title="Decrease margin">−</button>
-            <span className="text-[0.6rem] tabular-nums text-muted-foreground/50 w-6 text-center">{aiResponseHPad}</span>
-            <button onClick={() => setAiResponseHPad(Math.min(80, aiResponseHPad + 4))} className="h-5 w-5 flex items-center justify-center rounded text-[0.65rem] text-muted-foreground/50 hover:bg-accent/40 hover:text-foreground/70 transition-colors" title="Increase margin">+</button>
-          </div>
-          {/* Text align */}
-          <div className="flex items-center gap-0.5 rounded border border-border/20 overflow-hidden">
-            {(["left", "center", "right"] as const).map((a) => (
-              <button
-                key={a}
-                onClick={() => setAiResponseAlign(a)}
-                className={`px-1.5 py-0.5 text-[0.6rem] font-medium transition-colors ${aiResponseAlign === a ? "bg-primary/20 text-primary" : "text-muted-foreground/40 hover:text-muted-foreground/70"}`}
-                title={`Align ${a}`}
-              >
-                {a === "left" ? "L" : a === "center" ? "C" : "R"}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+  const openSource = async (ref: EvidenceRef) => {
+    setLoadingSource(true); setSourceError(""); setSource(null);
+    try { setSource({ ref, text: await invoke<string>("read_project_evidence", { id: ref.id }) }); }
+    catch (e) { setSourceError(String(e)); }
+    finally { setLoadingSource(false); }
+  };
+  return <section className="flex min-h-0 flex-1 flex-col gap-3" aria-label="Meeting answer">
+    <div className="flex flex-wrap items-center gap-2 border-b border-border pb-2">
+      <span className="mr-auto text-xs font-medium">Your answer</span>
+      {stream.isStreaming && <span className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status"><Loader2 className="h-3 w-3 animate-spin" />{stream.phase === "searching" ? "Finding sources" : "Preparing"}</span>}
+      {stream.isStreaming && <button className={button} onClick={() => cancelGeneration().catch(e => showToast(String(e), "error"))}>Cancel</button>}
+      {latest && latest.id !== selected && <button className={`${button} text-primary`} onClick={() => { setSelected(latest.id); setSource(null); }}>New answer</button>}
+      {stream.isStreaming && response && <button className={button} onClick={() => setSelected(null)}>View live</button>}
     </div>
-  );
-}
-
-// --- Sub-components ---
-
-function SourcesList({ sources }: { sources?: StreamSource[] }) {
-  if (!sources || sources.length === 0) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 border-t border-border/10 pt-2">
-      <Globe className="h-3 w-3 shrink-0 text-muted-foreground/40" aria-hidden="true" />
-      {sources.map((source, idx) => (
-        <a
-          key={`${source.url}-${idx}`}
-          href={source.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          title={source.url}
-          className="max-w-[14rem] truncate rounded-full bg-accent/30 px-2 py-0.5 text-meta text-muted-foreground/70 hover:bg-accent/50 hover:text-foreground/80 transition-colors"
-        >
-          {source.title}
-        </a>
-      ))}
+    {stream.error && <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 p-2 text-xs">
+      <span className="min-w-0 flex-1 text-destructive">{stream.error}</span>
+      <button className={button} disabled={stream.isStreaming} onClick={() => generateAssist(stream.currentMode ?? "Assist", stream.currentQuestion ?? "", stream.currentEvidence).catch(e => showToast(String(e), "error"))}>Retry</button>
+    </div>}
+    <div className="min-h-0 flex-1 overflow-y-auto space-y-4 pr-1">
+      {(response?.searchDegraded ?? stream.searchDegraded) && <p className="text-xs text-muted-foreground">Keyword search · semantic search unavailable or not configured</p>}
+      {question && <p className="text-xs leading-relaxed text-muted-foreground">{question}</p>}
+      {content ? <>
+        <div className="answer-content prose prose-sm max-w-none break-words" style={{ fontSize: `${config.aiResponseFontSize}px`, color: readingColor(config.aiResponseTextColor, "answer"), lineHeight: config.aiResponseLineHeight, paddingInline: config.aiResponseHPad, textAlign: config.aiResponseAlign }}>
+          <AnswerMarkdown content={brief} />
+        </div>
+        {detail.length > 0 && <details><summary className="cursor-pointer text-xs font-medium">Details</summary><div className="prose prose-sm prose-invert mt-3"><AnswerMarkdown content={detail.join("\n")} /></div></details>}
+        <div className="flex flex-wrap gap-2">
+          <button className={button} disabled={stream.isStreaming} onClick={() => act("Shorten", `Shorten this answer, preserving its source markers:\n${content}`)}>Shorter</button>
+          <button className={button} disabled={stream.isStreaming} onClick={() => act("FollowUp", `Suggest a useful follow-up to this question and answer:\n${question ?? ""}\n${content}`)}>Follow-up</button>
+          <button className={`${button} flex items-center gap-1`} onClick={async () => { try { await navigator.clipboard.writeText(content); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { showToast("Clipboard unavailable", "error"); } }}>{copied ? <Check size={12} /> : <Copy size={12} />}Copy</button>
+          {response && <button className={`${button} flex items-center gap-1`} aria-pressed={stream.pinnedResponses.some(r => r.id === response.id)} onClick={() => stream.pinnedResponses.some(r => r.id === response.id) ? stream.unpinResponse(response.id) : stream.pinResponse(response.id)}><Pin size={12} />Keep</button>}
+        </div>
+        <details className="border-y border-border py-2" open={source !== null}>
+          <summary className="cursor-pointer text-xs font-medium">Sources · {evidence.length}</summary>
+          {!evidence.length && <p className="mt-2 text-xs text-muted-foreground">No indexed project evidence was returned. This answer may rely on conversation or added documents.</p>}
+          <ol className="mt-2 space-y-1.5">
+            {evidence.map((ref, i) => <li key={ref.id}><button className="w-full rounded-md p-2 text-left text-xs hover:bg-accent focus-visible:outline-2 focus-visible:outline-primary" onClick={() => openSource(ref)}><span className="font-mono break-all">[S{i + 1}] {ref.path}:{ref.startLine}–{ref.endLine}</span><span className="mt-1 block text-muted-foreground">{ref.revision.slice(0, 10)}{ref.dirty ? " · local changes" : ""}</span></button></li>)}
+          </ol>
+          {loadingSource && <p role="status" className="text-xs">Opening source…</p>}
+          {sourceError && <p role="alert" className="text-xs text-destructive">{sourceError}</p>}
+          {source && <div className="mt-2 rounded-md border border-border p-3"><div className="flex items-start gap-2"><p className="min-w-0 flex-1 break-all text-xs font-mono">{source.ref.path}</p><button aria-label="Close source" onClick={() => setSource(null)}><X size={14} /></button></div><p className="my-2 text-xs text-muted-foreground">Indexed snapshot · line {source.ref.startLine}</p><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed">{source.text}</pre></div>}
+        </details>
+        {follow.questions.length > 0 && <details><summary className="text-xs cursor-pointer">Suggested follow-ups</summary><div className="mt-2 space-y-2">{follow.questions.map(q => <button key={q} className={`${button} block text-left`} disabled={stream.isStreaming} onClick={() => act("AskQuestion", q)}>{q}</button>)}</div></details>}
+        {response && <p className="text-[11px] text-muted-foreground" title={costScope}>{response.model} · {(response.latency_ms / 1000).toFixed(1)} s{response.totalTokens ? ` · ${response.totalTokens} tokens` : ""}{estimatedCost != null ? ` · ~$${estimatedCost.toFixed(4)} text cost` : " · cost unavailable"}</p>}
+      </> : <div className="py-8"><p className="text-base font-medium">Ready for your next question</p><p className="mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">Ask about the selected project, or start a meeting to receive help as questions arrive. Answers and their sources stay here for you to read.</p>{isReadingLive && stream.isStreaming && <p className="mt-4 text-sm text-primary" role="status">Finding context and preparing an answer…</p>}</div>}
     </div>
-  );
-}
-
-function TabButton({
-  label,
-  active,
-  onClick,
-  secondary,
-  pinned,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-  secondary?: boolean;
-  pinned?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      role="tab"
-      aria-selected={active}
-      className={`shrink-0 rounded-full px-2.5 py-0.5 text-meta font-medium transition-colors duration-150 ${
-        active
-          ? "bg-primary/20 text-primary"
-          : secondary
-            ? "text-muted-foreground/70 hover:bg-muted/30 hover:text-muted-foreground"
-            : pinned
-              ? "text-warning/70 hover:bg-warning/10 hover:text-warning"
-              : "text-muted-foreground/70 hover:bg-muted/30 hover:text-muted-foreground"
-      }`}
-    >
-      {pinned && <Pin className="mr-0.5 inline-block h-2.5 w-2.5" aria-hidden="true" />}
-      {label}
-    </button>
-  );
-}
-
-function ActionButton({
-  icon: Icon,
-  title,
-  onClick,
-  active,
-}: {
-  icon: typeof Copy;
-  title: string;
-  onClick: () => void;
-  active?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-lg p-1.5 transition-colors duration-150 ${
-        active
-          ? "text-success"
-          : "text-muted-foreground/60 hover:text-muted-foreground hover:bg-accent"
-      }`}
-      aria-label={title}
-    >
-      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-    </button>
-  );
-}
-
-function FollowUps({ questions }: { questions: string[] }) {
-  if (questions.length === 0) return null;
-  return (
-    <div className="space-y-1 border-t border-border pt-2">
-      <div className="text-meta uppercase tracking-wider text-muted-foreground">Follow-ups</div>
-      {questions.map((question) => (
-        <button
-          key={question}
-          className="block w-full border border-border bg-background px-2 py-1.5 text-left text-xs text-foreground hover:bg-accent cursor-pointer"
-          onClick={() => {
-            generateAssist("AskQuestion", question).catch(() => {});
-          }}
-        >
-          {question}
-        </button>
-      ))}
-    </div>
-  );
+    {stream.responseHistory.length > 0 && <details className="border-t border-border pt-2"><summary className="text-xs cursor-pointer">Answer history · {stream.responseHistory.length}</summary><div className="max-h-32 overflow-y-auto mt-2 space-y-1">{stream.responseHistory.map(r => <button key={r.id} className={`${button} block w-full text-left truncate ${selected === r.id ? "text-primary" : ""}`} onClick={() => { setSelected(r.id); setSource(null); }}>{r.question || r.content.slice(0, 70)}</button>)}</div></details>}
+    <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">Reading preferences</summary><div className="flex flex-wrap gap-3 py-2 items-center">
+      <label>Size <input className="w-12 bg-transparent" type="number" min={10} max={32} value={config.aiResponseFontSize} onChange={e => config.setAiResponseFontSize(Math.max(10, Math.min(32, Number(e.target.value))))} /></label>
+      <label>Spacing <input className="w-12 bg-transparent" type="number" min={1} max={3} step={0.1} value={config.aiResponseLineHeight} onChange={e => config.setAiResponseLineHeight(Math.max(1, Math.min(3, Number(e.target.value))))} /></label>
+      <ColorPickerButton value={config.aiResponseTextColor} onChange={config.setAiResponseTextColor} label="Answer text color" />
+      <label>Margin <input className="w-12 bg-transparent" type="number" min={0} max={80} value={config.aiResponseHPad} onChange={e => config.setAiResponseHPad(Math.max(0, Math.min(80, Number(e.target.value))))} /></label>
+      <label>Align <select className="bg-background" value={config.aiResponseAlign} onChange={e => config.setAiResponseAlign(e.target.value as "left" | "center" | "right")}><option>left</option><option>center</option><option>right</option></select></label>
+    </div></details>
+  </section>;
 }

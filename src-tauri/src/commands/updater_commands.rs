@@ -10,13 +10,36 @@ pub struct UpdateInfo {
     pub date: Option<String>,
 }
 
+/// Development builds do not advertise an update channel until signed configuration exists.
+#[command]
+pub fn updater_enabled(app: AppHandle) -> bool {
+    app.config().plugins.0.get("updater").is_some_and(|c| {
+        c.get("pubkey")
+            .and_then(|v| v.as_str())
+            .is_some_and(|v| !v.trim().is_empty())
+            && c.get("endpoints")
+                .and_then(|v| v.as_array())
+                .is_some_and(|urls| {
+                    !urls.is_empty()
+                        && urls
+                            .iter()
+                            .all(|u| u.as_str().is_some_and(|s| s.starts_with("https://")))
+                })
+    })
+}
+
 /// Check for an available update.
 ///
 /// Returns `Some(UpdateInfo)` if a newer version is available, or `None` if the
 /// app is already up-to-date.
 #[command]
 pub async fn check_for_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
-    let updater = app.updater().map_err(|e| format!("Failed to get updater: {}", e))?;
+    if !updater_enabled(app.clone()) {
+        return Err("Signed updates are not configured for this build.".into());
+    }
+    let updater = app
+        .updater()
+        .map_err(|e| format!("Failed to get updater: {}", e))?;
 
     let update = updater
         .check()
@@ -40,7 +63,12 @@ pub async fn check_for_update(app: AppHandle) -> Result<Option<UpdateInfo>, Stri
 /// completion.
 #[command]
 pub async fn download_and_install_update(app: AppHandle) -> Result<(), String> {
-    let updater = app.updater().map_err(|e| format!("Failed to get updater: {}", e))?;
+    if !updater_enabled(app.clone()) {
+        return Err("Signed updates are not configured for this build.".into());
+    }
+    let updater = app
+        .updater()
+        .map_err(|e| format!("Failed to get updater: {}", e))?;
 
     let update = updater
         .check()
@@ -69,10 +97,7 @@ pub async fn download_and_install_update(app: AppHandle) -> Result<(), String> {
         .await
         .map_err(|e| format!("Failed to download and install update: {}", e))?;
 
-    let _ = app.emit(
-        "update_ready",
-        serde_json::json!({ "version": version }),
-    );
+    let _ = app.emit("update_ready", serde_json::json!({ "version": version }));
 
     log::info!("Update v{} downloaded and installed successfully", version);
 

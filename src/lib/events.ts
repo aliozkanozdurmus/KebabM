@@ -21,6 +21,12 @@ import type {
   UpdateReadyEvent,
 } from "./types";
 
+import { RequestGate } from "./requestGate";
+const gate = new RequestGate();
+export function beginStreamRequest(requestId: string) { gate.begin(requestId); }
+export function closeStreamRequest() { gate.cancel(); }
+export function isStreamRequestCurrent(requestId: string) { return gate.current === requestId; }
+
 // == TRANSCRIPT EVENTS ==
 
 export function onTranscriptUpdate(
@@ -45,36 +51,38 @@ export function onStreamStart(
   handler: (event: StreamStartEvent) => void
 ): Promise<UnlistenFn> {
   return listen<StreamStartEvent>("llm_stream_start", (e) =>
-    handler(e.payload)
+    {
+      if (!gate.start(e.payload.requestId)) return;
+      handler(e.payload);
+    }
   );
 }
 
 export function onStreamToken(
   handler: (event: StreamTokenEvent) => void
 ): Promise<UnlistenFn> {
-  return listen<StreamTokenEvent>("llm_stream_token", (e) =>
-    handler(e.payload)
-  );
+  return listen<StreamTokenEvent>("llm_stream_token", (e) => { if (gate.token(e.payload.requestId)) handler(e.payload); });
 }
 
 export function onStreamEnd(
   handler: (event: StreamEndEvent) => void
 ): Promise<UnlistenFn> {
-  return listen<StreamEndEvent>("llm_stream_end", (e) => handler(e.payload));
+  return listen<StreamEndEvent>("llm_stream_end", (e) => { if (gate.end(e.payload.requestId)) handler(e.payload); });
 }
 
 export function onStreamSources(
   handler: (event: StreamSourcesEvent) => void
 ): Promise<UnlistenFn> {
-  return listen<StreamSourcesEvent>("llm_stream_sources", (e) =>
-    handler(e.payload)
-  );
+  return listen<StreamSourcesEvent>("llm_stream_sources", (e) => { if (gate.token(e.payload.requestId)) handler(e.payload); });
 }
 
 export function onStreamError(
   handler: (error: string) => void
 ): Promise<UnlistenFn> {
-  return listen<string>("llm_stream_error", (e) => handler(e.payload));
+  return listen<{ requestId?: string; message: string } | string>("llm_stream_error", (e) => {
+    if (typeof e.payload === "string") handler(e.payload);
+    else if (gate.end(e.payload.requestId)) handler(e.payload.message);
+  });
 }
 
 // == QUESTION DETECTION EVENTS ==
@@ -261,3 +269,9 @@ export function onUpdateReady(
 }
 
 // Tray events are handled via raw listen() calls in App.tsx
+
+export function onAssistEvent(handler: (event: import("./types").AssistEvent) => void): Promise<UnlistenFn> {
+  return listen<import("./types").AssistEvent>("assist_event", ({ payload }) => {
+    if (["detected", "searching", "generating"].includes(payload.status) && gate.start(payload.requestId)) handler(payload);
+  });
+}

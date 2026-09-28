@@ -75,7 +75,7 @@ export function ProjectPanel({
       });
       try {
         await scanProject(project.id);
-        showToast(`${name} is ready for meetings`, "success");
+        showToast(`${name} source index is ready`, "success");
       } catch (err) {
         showToast(err instanceof Error ? err.message : "The project was added. The knowledge base was not written.", "error");
       } finally {
@@ -96,7 +96,7 @@ export function ProjectPanel({
   const unassigned = meetings.filter((meeting) => !meeting.project_id);
 
   return (
-    <aside className="flex h-full w-[280px] shrink-0 flex-col border-r border-border bg-card text-foreground">
+    <aside className="flex h-full w-[190px] lg:w-[240px] shrink-0 flex-col border-r border-border bg-card text-foreground">
       <div className="flex items-center justify-between px-3 py-3">
         <h2 className="text-xs uppercase tracking-wider text-muted-foreground">Projects</h2>
         <button onClick={addProject} className="inline-flex items-center gap-1 text-xs text-[#78a9ff] cursor-pointer" aria-label="Add project folder">
@@ -130,7 +130,7 @@ export function ProjectPanel({
               >
                 <div className="truncate text-sm">{project.name}</div>
                 <div className={`text-[11px] ${focused ? "text-primary-foreground/80" : "text-muted-foreground"}`}>
-                  {project.brief ? "Knowledge base ready" : "No knowledge base yet"}
+                  {project.scanned_at ? `${project.file_count} source files` : "Scan required"}
                   {" · "}
                   {projectMeetings.length} meeting{projectMeetings.length === 1 ? "" : "s"}
                 </div>
@@ -164,7 +164,7 @@ export function ProjectPanel({
                       await scanProject(project.id);
                       await setActiveProject(project.id);
                       onFocusProject(project.id);
-                      showToast(`${project.name} knowledge base is ready`, "success");
+                      showToast(`${project.name} source index is ready`, "success");
                       await refresh();
                       onChanged?.();
                     } catch (err) {
@@ -177,7 +177,7 @@ export function ProjectPanel({
                   }}
                 >
                   <RefreshCw className={`h-3 w-3 ${scanningId === project.id ? "animate-spin" : ""}`} />
-                  {scanningId === project.id ? scanDetail || "Reading" : "Build knowledge"}
+                  {scanningId === project.id ? scanDetail || "Reading" : "Update index"}
                 </button>
                 <button
                   className="text-[11px] text-muted-foreground cursor-pointer"

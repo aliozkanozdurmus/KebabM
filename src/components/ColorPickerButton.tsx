@@ -55,10 +55,11 @@ export function ColorPickerButton({ value, onChange, label }: ColorPickerButtonP
         onClick={handleOpen}
         className="flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-white/5 transition-colors cursor-pointer"
         title={label || "Pick color"}
+        aria-label={label || "Pick color"}
       >
         <div
           className="h-3.5 w-3.5 rounded border border-white/15"
-          style={{ backgroundColor: value }}
+          style={{ backgroundColor: value === "auto" ? "hsl(var(--foreground))" : value }}
         />
         <svg className="h-2 w-2 text-muted-foreground/35" viewBox="0 0 12 12" fill="none">
           <path d="M3 5L6 8L9 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -70,11 +71,12 @@ export function ColorPickerButton({ value, onChange, label }: ColorPickerButtonP
           ref={ref}
           className="fixed z-[9999] rounded-lg border border-white/10 p-2.5 shadow-2xl shadow-black/60"
           style={{
-            backgroundColor: '#111122',
+            backgroundColor: 'hsl(var(--popover))',
             left: `${Math.max(90, Math.min(pos.x - 90, window.innerWidth - 195))}px`,
             top: `${Math.max(8, pos.y - 185)}px`,
           }}
         >
+          <button type="button" className="mb-2 w-full border border-border px-2 py-1.5 text-xs text-foreground hover:bg-accent" onClick={() => { onChange("auto"); setOpen(false); }}>Use appearance color</button>
           {/* Color grid — 5x3, no scale transforms */}
           <div className="grid grid-cols-5 gap-[7px]">
             {PALETTE.map((c) => (
@@ -96,12 +98,13 @@ export function ColorPickerButton({ value, onChange, label }: ColorPickerButtonP
           <div className="mt-2 flex items-center gap-1.5 border-t border-white/6 pt-2">
             <div
               className="h-3.5 w-3.5 rounded-[3px] border border-white/10 shrink-0"
-              style={{ backgroundColor: value }}
+              style={{ backgroundColor: value === "auto" ? "hsl(var(--foreground))" : value }}
             />
             <span className="text-[0.6rem] text-muted-foreground/30 font-mono">#</span>
             <input
               type="text"
-              value={value.replace('#', '')}
+              value={value === 'auto' ? '' : value.replace('#', '')}
+              placeholder="auto"
               onChange={(e) => {
                 const hex = e.target.value.replace('#', '');
                 if (/^[0-9a-fA-F]{0,6}$/.test(hex)) {
@@ -110,7 +113,6 @@ export function ColorPickerButton({ value, onChange, label }: ColorPickerButtonP
               }}
               className="w-14 bg-transparent text-[0.6rem] text-foreground/60 outline-none font-mono tracking-wider"
               maxLength={6}
-              placeholder="custom"
             />
           </div>
         </div>,
