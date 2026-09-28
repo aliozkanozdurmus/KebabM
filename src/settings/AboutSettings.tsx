@@ -13,7 +13,7 @@ import { useUpdaterStore } from "../stores/updaterStore";
 import { getPlatformCapabilities } from "../lib/ipc";
 import type { PlatformCapabilities } from "../lib/types";
 
-const GITHUB_URL = "https://github.com/aliozkanozdurmus/ZaiqoM-MeetingHelper";
+const GITHUB_URL = "https://github.com/aliozkanozdurmus/KebabM";
 
 function formatBuildDate(dateStr: string): string {
   try {
@@ -53,7 +53,7 @@ export function AboutSettings() {
         <div className="flex items-start gap-5">
           <BrandMark className="h-16 w-16" />
           <div>
-            <h3 className="text-lg font-bold text-foreground">ZaiqoM-MeetingHelper</h3>
+            <h3 className="text-lg font-bold text-foreground">KebabM</h3>
             <p className="text-xs text-muted-foreground">
               v{NEXQ_VERSION}
             </p>
@@ -150,7 +150,7 @@ export function AboutSettings() {
       {/* Footer */}
       <div className="rounded-xl border border-border/30 bg-card/50 p-5">
         <p className="text-xs text-muted-foreground/60 leading-relaxed">
-          ZaiqoM-MeetingHelper is a desktop application. All processing can run locally
+          KebabM is a desktop application. All processing can run locally
           with Ollama or LM Studio, or optionally connect to cloud AI providers.
         </p>
       </div>

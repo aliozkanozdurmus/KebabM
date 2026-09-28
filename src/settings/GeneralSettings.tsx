@@ -110,7 +110,7 @@ export function GeneralSettings() {
               Start on Login
             </label>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Launch ZaiqoM-MeetingHelper automatically when you log in
+              Launch KebabM automatically when you log in
             </p>
           </div>
           <button

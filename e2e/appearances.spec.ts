@@ -1,13 +1,13 @@
 import { test, expect } from '@playwright/test';
-const options = ['IBM','Liquid Glass','Apple','Linear','Notion','Material','GitHub','Terminal'];
-const ids = ['ibm','liquid-glass','apple','linear','notion','material','github','terminal'];
+const options = ['IBM','Liquid Glass','Apple','Linear','Notion','Material','GitHub','Terminal','Notebook'];
+const ids = ['ibm','liquid-glass','apple','linear','notion','material','github','terminal','notebook'];
 for (const width of [400,700,1440]) {
   test(`all appearances, both color modes and keyboard at ${width}px`, async ({ page }) => {
     const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
     await page.setViewportSize({ width, height: 1000 });
     await page.goto('/tests/ui/?settings');
     await page.getByRole('tab', { name: 'Appearance & behavior' }).click();
-    await expect(page.getByRole('radio')).toHaveCount(8);
+    await expect(page.getByRole('radio')).toHaveCount(9);
     for (const mode of ['Light','Dark']) {
       await page.getByRole('button', { name: mode, exact: true }).click();
       for (let i=0; i<options.length; i++) {

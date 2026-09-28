@@ -323,6 +323,8 @@ impl STTProvider for WhisperCppSTT {
         let language = self.language.clone();
         let stop_flag = Arc::clone(&self.stop_flag);
         let tx = result_tx.clone();
+        let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+        self.stop_flag.store(false, AtomicOrdering::SeqCst);
 
         let thread = std::thread::spawn(move || {
             use whisper_rs::{
@@ -340,6 +342,7 @@ impl STTProvider for WhisperCppSTT {
                 Ok(ctx) => ctx,
                 Err(e) => {
                     log::error!("WhisperCppSTT: Failed to load model: {}", e);
+                    let _ = ready_tx.send(Err("Whisper model could not be loaded. Download the model again in Audio settings.".into()));
                     return;
                 }
             };
@@ -348,11 +351,15 @@ impl STTProvider for WhisperCppSTT {
                 Ok(s) => s,
                 Err(e) => {
                     log::error!("WhisperCppSTT: Failed to create state: {}", e);
+                    let _ = ready_tx.send(Err("Whisper could not initialize recognition. Free memory and retry.".into()));
                     return;
                 }
             };
 
             log::info!("WhisperCppSTT: Model loaded, inference thread ready");
+            if ready_tx.send(Ok(())).is_err() || stop_flag.load(AtomicOrdering::SeqCst) {
+                return;
+            }
 
             let mut pending = BinaryHeap::<PrioritizedTask>::new();
             let mut seq_counter = 0u64;
@@ -549,6 +556,20 @@ impl STTProvider for WhisperCppSTT {
             log::info!("WhisperCppSTT: Inference thread exiting");
         });
 
+        match tokio::time::timeout(Duration::from_secs(60), ready_rx).await {
+            Ok(Ok(Ok(()))) => {}
+            result => {
+                self.stop_flag.store(true, AtomicOrdering::SeqCst);
+                drop(inf_tx);
+                let message = match result {
+                    Ok(Ok(Err(message))) => message,
+                    Ok(Err(_)) => "Whisper initialization stopped unexpectedly. Retry or choose another model.".into(),
+                    Err(_) => "Whisper model initialization timed out. Try a smaller model.".into(),
+                    _ => unreachable!(),
+                };
+                return Err(message.into());
+            }
+        }
         self.result_tx = Some(result_tx);
         self.inference_tx = Some(inf_tx);
         self.feedback_rx = Some(std::sync::Mutex::new(fb_rx));
@@ -737,5 +758,70 @@ impl STTProvider for WhisperCppSTT {
     fn set_language(&mut self, language: &str) {
         self.language = language.split('-').next().unwrap_or(language).to_string();
         log::info!("WhisperCppSTT: Language set to {}", self.language);
+    }
+}
+
+#[cfg(test)]
+mod startup_tests {
+    use super::*;
+
+    /// Opt-in native smoke test with a real model and 16 kHz mono signed LE PCM.
+    /// KEBABM_WHISPER_MODEL / KEBABM_STT_PCM point to local fixtures;
+    /// KEBABM_STT_EXPECTED is a phrase that must occur in recognition output.
+    #[tokio::test]
+    #[ignore = "requires a downloaded model and a speech fixture"]
+    async fn real_model_recognizes_speech() {
+        let model = std::env::var("KEBABM_WHISPER_MODEL").expect("model path");
+        let pcm = std::fs::read(std::env::var("KEBABM_STT_PCM").expect("PCM path")).unwrap();
+        let expected = std::env::var("KEBABM_STT_EXPECTED").expect("expected phrase");
+        assert!(!expected.trim().is_empty());
+        assert_eq!(pcm.len() % 2, 0);
+        let mut provider = WhisperCppSTT::new(model.into(), Arc::new(RwLock::new(DualPassConfig::default())));
+        provider.set_language("en");
+        let (tx, mut rx) = mpsc::channel(32);
+        provider.start_stream(tx).await.expect("real model initialization");
+        provider.feed_audio(AudioChunk {
+            pcm_data: pcm.chunks_exact(2).map(|v| i16::from_le_bytes([v[0], v[1]])).collect(),
+            source: crate::audio::AudioSource::System,
+            timestamp_ms: 0,
+            is_speech: true,
+        }).await.unwrap();
+        let result = tokio::time::timeout(Duration::from_secs(90), async {
+            let mut silence = tokio::time::interval(Duration::from_millis(100));
+            loop {
+                tokio::select! {
+                    result = rx.recv() => {
+                        let Some(result) = result else { return false; };
+                        eprintln!("Local speech smoke result (final={}): {}", result.is_final, result.text);
+                        if result.is_final && result.text.to_lowercase().contains(&expected.to_lowercase()) {
+                            return true;
+                        }
+                    }
+                    _ = silence.tick() => {
+                        provider.feed_audio(AudioChunk {
+                            pcm_data: vec![0; 1600],
+                            source: crate::audio::AudioSource::System,
+                            timestamp_ms: 0,
+                            is_speech: false,
+                        }).await.unwrap();
+                    }
+                }
+            }
+        }).await;
+        provider.stop_stream().await.unwrap();
+        assert!(matches!(result, Ok(true)), "expected phrase was not recognized");
+    }
+
+    #[tokio::test]
+    async fn corrupt_model_reports_failure_instead_of_claiming_stream_is_ready() {
+        let path = std::env::temp_dir().join(format!("kebabm-invalid-whisper-{}.bin", uuid::Uuid::new_v4()));
+        std::fs::write(&path, b"not a whisper model").unwrap();
+        let mut provider = WhisperCppSTT::new(path.clone(), Arc::new(RwLock::new(DualPassConfig::default())));
+        let (tx, _) = mpsc::channel(4);
+        let result = provider.start_stream(tx).await;
+        let _ = std::fs::remove_file(path);
+        assert!(result.unwrap_err().to_string().contains("could not be loaded"));
+        assert!(!provider.is_streaming);
+        assert!(provider.inference_tx.is_none());
     }
 }

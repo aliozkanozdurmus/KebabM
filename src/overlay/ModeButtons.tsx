@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useStreamStore } from "../stores/streamStore";
 import { useAIActionsStore } from "../stores/aiActionsStore";
 import { useConfigStore } from "../stores/configStore";
-import { generateAssist, cancelGeneration } from "../lib/ipc";
+import { generateManualAssist, cancelGeneration } from "../lib/ipc";
 import { showToast } from "../stores/toastStore";
 import type { IntelligenceMode } from "../lib/types";
 import {
@@ -128,9 +128,7 @@ export function ModeButtons() {
         setAskInputVisible((v) => !v);
         return;
       }
-      const answer = useStreamStore.getState();
-      const transform = mode === "Shorten" || mode === "FollowUp";
-      generateAssist(mode, transform ? `${mode === "Shorten" ? "Shorten this answer while retaining citations" : "Suggest a follow-up to this answer"}:\n${answer.currentContent}` : undefined, transform ? answer.currentEvidence : undefined).catch((err) => showToast(err instanceof Error ? err.message : "Couldn't generate AI response", "error"));
+      generateManualAssist(mode).catch(err => showToast(String(err), "error"));
     },
     [isStreaming, currentMode]
   );
@@ -138,7 +136,7 @@ export function ModeButtons() {
   const handleAskSubmit = useCallback(() => {
     const text = askInputText.trim();
     if (!text || isStreaming) return;
-    generateAssist("AskQuestion", text).catch((err) =>
+    generateManualAssist("AskQuestion", text).catch((err) =>
       showToast(err instanceof Error ? err.message : "Couldn't send question", "error")
     );
     setAskInputText("");

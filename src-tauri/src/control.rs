@@ -262,6 +262,9 @@ async fn write_json(socket: &mut tokio::net::TcpStream, status: u16, body: Value
 
 async fn dispatch(app: &AppHandle, tool: &str, args: Value) -> Value {
     let outcome = match tool {
+        "calendar_status" => crate::calendar::calendar_status(app.clone()).await,
+        "calendar_events" => crate::calendar::calendar_events(app.clone()).await,
+        "calendar_disconnect" => crate::calendar::calendar_disconnect(app.clone()).await.map(|_| json!({"disconnected": true})),
         "status" => status(app),
         "platform" => serde_json::to_value(crate::platform::current()).map_err(|e| e.to_string()),
         "get_settings" => get_settings(app),
@@ -313,14 +316,31 @@ fn status(app: &AppHandle) -> Result<Value, String> {
     let project = crate::projects::active(db.connection())?;
     let open_meeting = open_live_meeting(db.connection())?;
     drop(db);
+    let secrets = present_secrets(&state);
+    let session = crate::intelligence::session::get_assist_session(app.clone())?;
+    // A persisted meeting without end_time may be left over from a crash.
+    // Report runtime ownership separately; never infer capture from database rows.
+    let mut windows: Vec<_> = app.webview_windows().into_iter().map(|(label, window)| {
+        json!({
+            "label": label,
+            "visible": window.is_visible().ok(),
+            "minimized": window.is_minimized().ok(),
+            "focused": window.is_focused().ok(),
+        })
+    }).collect();
+    windows.sort_by(|a, b| a["label"].as_str().cmp(&b["label"].as_str()));
     Ok(json!({
-        "name": "ZaiqoM-MeetingHelper",
+        "name": "KebabM",
         "version": env!("CARGO_PKG_VERSION"),
         "language": language,
         "settings": picked_settings(app)?,
         "active_project": project,
         "open_meeting": open_meeting,
-        "secrets_present": present_secrets(&state)?,
+        "active_session_id": session.session_id,
+        "windows": windows,
+        "secrets_present": secrets.as_ref().ok(),
+        "credential_status": if secrets.is_ok() { "ready" } else { "unavailable" },
+        "credential_error": secrets.err(),
         "platform": crate::platform::current(),
         "data_dir": app.path().app_data_dir().ok().map(|p| p.display().to_string()),
     }))
@@ -361,8 +381,8 @@ async fn set_settings(app: &AppHandle, args: &Value) -> Result<Value, String> {
         return Err("settings must be an object".to_string());
     };
     if let Some(value) = map.get("appearance") {
-        if !matches!(value.as_str(), Some("ibm" | "liquid-glass" | "apple" | "linear" | "notion" | "material" | "github" | "terminal")) {
-            return Err("Unknown appearance. Use ibm, liquid-glass, apple, linear, notion, material, github, or terminal.".to_string());
+        if !matches!(value.as_str(), Some("ibm" | "liquid-glass" | "apple" | "linear" | "notion" | "material" | "github" | "terminal" | "notebook")) {
+            return Err("Unknown appearance. Use ibm, liquid-glass, apple, linear, notion, material, github, terminal, or notebook.".to_string());
         }
     }
     let mut unknown = Vec::new();
@@ -785,8 +805,8 @@ fn creds(
         .credentials
         .as_ref()
         .ok_or_else(|| "Credential store is not ready".to_string())?
-        .lock()
-        .map_err(|e| e.to_string())
+        .try_lock()
+        .map_err(|_| "Credential store is busy. Wait for the current credential operation, then retry.".to_string())
 }
 
 fn lock_db(

@@ -37,7 +37,7 @@ export function AppearancePicker() {
               } as CSSProperties}>
                 <span className="appearance-preview-bar" style={{ borderColor: border, background: a.id === 'liquid-glass' ? `linear-gradient(110deg, ${surface}, ${border})` : surface }}>
                   <BrandMark decorative className="h-3.5 w-3.5" />
-                  <span>ZaiqoM</span><span className="ml-auto" style={{ color: muted }}>···</span>
+                  <span>KebabM</span><span className="ml-auto" style={{ color: muted }}>···</span>
                 </span>
                 <span className="appearance-preview-content">
                   <span style={{ color: muted }}>LIVE HELP</span>

@@ -1,8 +1,14 @@
-# ZaiqoM logo
+# KebabM logo
 
 Generated with the built-in ChatGPT image generation tool on 2026-09-28.
-Production source: `public/brand/zaiqom-mark.png`. Native formats are generated with `npm run tauri -- icon public/brand/zaiqom-mark.png`.
+Production source: `public/brand/kebabm-mark.png`. Native formats are generated with `npm run tauri -- icon public/brand/kebabm-mark.png`.
 
-## Final prompt
+The mark combines a capital K, rounded kebab-skewer forms and subtle conversation tails. Warm ivory and orange on deep olive complement the Notebook appearance. Use the same mark across onboarding, launcher, settings, tray, favicon and application packages.
 
-Use case: logo-brand. Create one finished, distinctive professional app icon for ZaiqoM MeetingHelper, a calm intelligent meeting companion that turns conversation into clear answers. A bold custom geometric Z formed from two interlocking conversation shapes, with a subtle negative-space dialogue cutout. Single memorable silhouette readable at 24px. Premium flat graphic, precisely balanced, confident and restrained, bright cool blue and near-white mark against a deep ink rounded-square tile. Large centered mark occupying about 70 percent of the tile. Square 1024x1024 composition with genuinely transparent background outside the rounded tile. No text, letters other than the abstract Z shape, no microphone, headset, robot, sparkle, stock chat bubble icon, mockup, surrounding objects, presentation sheet, bevels or drop shadow. Deliver exactly one clean production logo icon.
+## Generation prompt
+
+Create a polished app icon for KebabM, a personal AI meeting notes and project knowledge assistant. One distinctive minimalist logo: a bold geometric capital K whose right diagonal arms evoke two rounded kebab pieces on a subtle diagonal skewer, also suggesting conversation. Sophisticated playful identity, not restaurant clipart. Warm ivory K mark with a small warm orange accent, deep olive green rounded-square tile. Flat vector-like crisp geometry, strong silhouette legible at 24 pixels, generous margins, no text or lettering besides the abstract K symbol, no mockup, no shadow outside icon, no gradients. Single centered square app icon.
+
+## Compatibility
+
+The display and GitHub repository name are KebabM. Internal `com.nexq.app`, legacy credential namespaces and control/event identifiers stay stable to preserve user data and existing MCP clients.

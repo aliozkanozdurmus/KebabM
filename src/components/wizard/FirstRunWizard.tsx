@@ -120,7 +120,7 @@ export function FirstRunWizard() {
         <div className="flex items-center gap-2.5">
           <BrandMark decorative />
           <span className="text-base font-bold tracking-tight text-foreground">
-            ZaiqoM-MeetingHelper
+            KebabM
           </span>
           <span className="text-sm text-muted-foreground/60 font-medium">
             Setup

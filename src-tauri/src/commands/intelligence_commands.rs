@@ -147,7 +147,7 @@ fn reply_language_instruction(code: &str) -> String {
         other => other,
     };
     format!(
-        "Assistance language: {name}. Write the entire answer in {name}, including headings and the three follow-up questions. \
+        "Assistance language: {name}. Write the entire answer in {name}, including any headings. \
          The transcript, translation, and knowledge base may be in another language. \
          Do not answer in the transcript language unless it is {name}."
     )
@@ -412,6 +412,7 @@ async fn generate_assist_inner(
         }
     };
     let mut search_degraded = false;
+    let mut search_reason = None;
     let project_pack = if let Some(project) = project {
         if let Some(refs) =
             source_evidence.filter(|_| matches!(mode.as_str(), "Shorten" | "FollowUp"))
@@ -458,11 +459,12 @@ async fn generate_assist_inner(
                 .as_ref()
                 .map(|q| q.text.as_str())
                 .unwrap_or("");
-            let (hits, degraded) = tokio::select! {
+            let (hits, degraded, reason) = tokio::select! {
                 _=cancel_flag.cancelled()=>return Err("Answer cancelled.".into()),
                 result=crate::commands::project_commands::retrieve_project(&state,&project,question)=>result?,
             };
             search_degraded = degraded;
+            search_reason = reason;
             Some(crate::projects::pack_hits(&project, &hits))
         }
     } else {
@@ -480,8 +482,14 @@ async fn generate_assist_inner(
         system_prompt.push_str(
             "\n\nAnswer only from the meeting context the user pasted for this general meeting. \
              If the fact is not in that context, say so. \
-             End with exactly three follow-up questions about the same topic.\n\n## Follow-ups\n- \n- \n- ",
+             Do not add follow-up questions unless that is the requested action.",
         );
+    }
+    // Action contracts override generic project/scenario formatting, including saved older defaults.
+    match mode.as_str() {
+        "Shorten" => system_prompt.push_str("\n\nCurrent action: shorten the supplied answer to at most two concise sentences, shorter than the original. Retain essential caveats and their source markers. Output only the shortened answer. No headings, extra detail, or follow-up questions."),
+        "FollowUp" => system_prompt.push_str("\n\nCurrent action: suggest two or three specific questions the user can ask next about the supplied answer. Output only one numbered list of questions. Do not answer the original question again or add a second list."),
+        _ => (),
     }
     let reply_language = state
         .ai_reply_language
@@ -748,6 +756,7 @@ async fn generate_assist_inner(
         identity.clone(),
         evidence.clone(),
         search_degraded,
+        search_reason.clone(),
     )
     .await;
 
@@ -783,7 +792,7 @@ async fn generate_assist_inner(
         if let Some(intel) = &state.intelligence {
             if let Ok(mut e) = intel.lock() {
                 if e.session.session_id.as_deref() == Some(&identity.session_id) {
-                    e.session.answers.insert(0,serde_json::json!({"id":identity.request_id,"sessionId":identity.session_id,"question":question_text,"content":text,"mode":mode,"model":used_model,"provider":used_provider,"timestamp":chrono::Utc::now().timestamp_millis(),"latency_ms":stats.latency_ms,"totalTokens":stats.total_tokens,"promptTokens":stats.prompt_tokens,"completionTokens":stats.completion_tokens,"evidence":evidence,"searchDegraded":search_degraded,"pinned":false}));
+                    e.session.answers.insert(0,serde_json::json!({"id":identity.request_id,"sessionId":identity.session_id,"question":question_text,"content":text,"mode":mode,"model":used_model,"provider":used_provider,"timestamp":chrono::Utc::now().timestamp_millis(),"latency_ms":stats.latency_ms,"totalTokens":stats.total_tokens,"promptTokens":stats.prompt_tokens,"completionTokens":stats.completion_tokens,"evidence":evidence,"searchDegraded":search_degraded,"searchReason":search_reason,"pinned":false}));
                     e.session.answers.truncate(100);
                 }
             }

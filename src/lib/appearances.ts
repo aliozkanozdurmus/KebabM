@@ -1,5 +1,5 @@
 /** App-owned interpretations of the Open Design references; see docs/design/README.md. */
-export type AppearanceId = 'ibm' | 'liquid-glass' | 'apple' | 'linear' | 'notion' | 'material' | 'github' | 'terminal';
+export type AppearanceId = 'ibm' | 'liquid-glass' | 'apple' | 'linear' | 'notion' | 'material' | 'github' | 'terminal' | 'notebook';
 type Palette = readonly [background: string, surface: string, foreground: string, muted: string, border: string, accent: string, onAccent: string];
 interface Appearance {
   id: AppearanceId;
@@ -29,6 +29,8 @@ export const appearances: readonly Appearance[] = [
     light: ['#ffffff','#f6f8fa','#1f2328','#656d76','#d0d7de','#0969da','#ffffff'], dark: ['#0d1117','#161b22','#e6edf3','#a5aeb9','#30363d','#79b8ff','#092749'] },
   { id: 'terminal', name: 'Terminal', description: 'Monospace focus. Sharp lines, green signals.', font: mono, radius: 0,
     light: ['#f1f5ee','#fbfdf8','#18261b','#4f6252','#bbcbbb','#246d39','#ffffff'], dark: ['#101710','#182219','#e0efe0','#a6bda7','#344d37','#8bd694','#142f1a'] },
+  { id: 'notebook', name: 'Notebook', description: 'Warm paper, olive accents. A quiet place for meetings.', font: system, radius: 8,
+    light: ['#faf9f5','#f3f2eb','#292b25','#65675d','#dddfd3','#465b35','#fafbf6'], dark: ['#20231e','#2a2e27','#edf0e6','#b5bbaa','#464d3e','#bdd59b','#25341b'] },
 ];
 export function isAppearanceId(value: unknown): value is AppearanceId {
   return appearances.some(a => a.id === value);

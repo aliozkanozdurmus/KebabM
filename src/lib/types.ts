@@ -236,6 +236,7 @@ export interface AIResponse {
   question?: string;
   evidence?: EvidenceRef[];
   searchDegraded?: boolean;
+  searchReason?: string;
   sessionId?: string;
   totalTokens?: number;
   id: string;
@@ -561,8 +562,10 @@ export interface StreamTokenEvent extends RequestIdentity {
 
 export interface StreamStartEvent extends RequestIdentity {
   search_degraded?: boolean;
+  search_reason?: string;
   evidence?: EvidenceRef[];
   searchDegraded?: boolean;
+  searchReason?: string;
   question?: string;
   mode: IntelligenceMode;
   model: string;

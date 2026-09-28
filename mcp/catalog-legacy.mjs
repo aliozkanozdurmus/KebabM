@@ -7,17 +7,17 @@ const obj = (properties, required = []) => ({
 });
 
 export const legacyTools = [
-  { name: "status", description: "Zaiqo snapshot: language, saved settings, active project, open meeting, which secrets exist (names only), and platform. The desktop app must be open.", inputSchema: obj({}) },
+  { name: "status", description: "KebabM snapshot: language, saved settings, active project, open meeting, which secrets exist (names only), and platform. The desktop app must be open.", inputSchema: obj({}) },
   { name: "platform", description: "What this operating system can do: mic, system audio, stealth, native speech recognition.", inputSchema: obj({}) },
   { name: "get_settings", description: "Read the saved app settings. Secrets are not included.", inputSchema: obj({}) },
   {
     name: "set_settings",
-    description: "Change saved settings and apply them in the running app. Pass a values object. Use firstRunCompleted true to leave the welcome wizard. Allowed keys include appearance (ibm, liquid-glass, apple, linear, notion, material, github, terminal), theme, sttProvider, sttLanguage, llmProvider, llmModel, meetingAudioConfig, recordingEnabled, deepgramConfig, groqConfig, pauseThresholdMs, autoTrigger, autoSummary, firstRunCompleted, overlayOpacity, and the tray toggles. API keys are not settings; use store_secret.",
+    description: "Change saved settings and apply them in the running app. Pass a values object. Use firstRunCompleted true to leave the welcome wizard. Allowed keys include appearance (ibm, liquid-glass, apple, linear, notion, material, github, terminal, notebook), theme, sttProvider, sttLanguage, llmProvider, llmModel, meetingAudioConfig, recordingEnabled, deepgramConfig, groqConfig, pauseThresholdMs, autoTrigger, autoSummary, firstRunCompleted, overlayOpacity, and the tray toggles. API keys are not settings; use store_secret.",
     inputSchema: obj({
       values: { type: "object", description: "Setting key to JSON value." },
     }),
   },
-  { name: "list_llm_providers", description: "List model providers Zaiqo can use, including xai, chatgpt, azure, openai, and the OpenAI-compatible clouds.", inputSchema: obj({}) },
+  { name: "list_llm_providers", description: "List model providers KebabM can use, including xai, chatgpt, azure, openai, and the OpenAI-compatible clouds.", inputSchema: obj({}) },
   {
     name: "configure_llm",
     description: "Select the model provider and model, and optionally store an API key. The key is saved in the OS credential store and is not returned. For Azure, base_url is the resource endpoint. For ChatGPT subscription use sign_in_chatgpt instead of an API key. provider examples: xai, openai, anthropic, gemini, azure, ollama, openrouter, chatgpt.",
@@ -41,7 +41,7 @@ export const legacyTools = [
     description: "Check that the selected model provider answers. Pass provider to select and save it first.",
     inputSchema: obj({ provider: str("Provider id."), model: str("Model id."), api_key: str("API key, if it is not stored yet."), base_url: str("Azure or custom base URL.") }),
   },
-  { name: "sign_in_chatgpt", description: "Start the official ChatGPT browser sign-in. This call waits until the login finishes. Zaiqo must be open.", inputSchema: obj({}) },
+  { name: "sign_in_chatgpt", description: "Start the official ChatGPT browser sign-in. This call waits until the login finishes. KebabM must be open.", inputSchema: obj({}) },
   {
     name: "store_secret",
     description: "Save a secret in the OS credential store. The value is not returned. provider is a short name such as xai, deepgram, azure, azure_endpoint, or azure_speech_region.",
@@ -71,7 +71,7 @@ export const legacyTools = [
   { name: "create_project", description: "Create a project from a local folder. This does not scan until scan_project.", inputSchema: obj({ name: str("Display name."), root_path: str("Absolute folder path.") }, ["name", "root_path"]) },
   { name: "set_active_project", description: "Choose which project the next meeting uses. Pass null or an empty id to clear it.", inputSchema: obj({ id: str("Project id, or empty to clear.") }) },
   { name: "delete_project", description: "Delete a project knowledge base. Meeting records stay.", inputSchema: obj({ id: str("Project id.") }, ["id"]) },
-  { name: "scan_project", description: "Read the project with the selected model and write the knowledge base. Zaiqo must be open and a model must already be selected. This can take several minutes.", inputSchema: obj({ id: str("Project id.") }, ["id"]) },
+  { name: "scan_project", description: "Read the project with the selected model and write the knowledge base. KebabM must be open and a model must already be selected. This can take several minutes.", inputSchema: obj({ id: str("Project id.") }, ["id"]) },
   { name: "list_meetings", description: "List recent meetings, including project and source.", inputSchema: obj({ limit: { type: "integer" }, offset: { type: "integer" } }) },
   { name: "get_meeting", description: "Read one meeting, including its transcript.", inputSchema: obj({ id: str("Meeting id.") }, ["id"]) },
   { name: "search_meetings", description: "Search meeting titles and transcripts.", inputSchema: obj({ query: str("Search text.") }, ["query"]) },
@@ -82,10 +82,10 @@ export const legacyTools = [
   },
   {
     name: "start_meeting",
-    description: "Ask the open Zaiqo window to start a live meeting with the active project. audio_mode is online or in_person. scenario is team_meeting, lecture, interview, webinar, oral_exam, or custom.",
+    description: "Ask the open KebabM window to start a live meeting with the active project. audio_mode is online or in_person. scenario is team_meeting, lecture, interview, webinar, oral_exam, or custom.",
     inputSchema: obj({ title: str("Optional meeting title."), audio_mode: str("online or in_person."), scenario: str("Meeting scenario.") }),
   },
-  { name: "end_meeting", description: "Ask the open Zaiqo window to end the live meeting and save it.", inputSchema: obj({}) },
+  { name: "end_meeting", description: "Ask the open KebabM window to end the live meeting and save it.", inputSchema: obj({}) },
   { name: "rename_meeting", description: "Rename a stored meeting.", inputSchema: obj({ id: str("Meeting id."), title: str("New title.") }, ["id", "title"]) },
   { name: "delete_meeting", description: "Delete a stored meeting.", inputSchema: obj({ id: str("Meeting id.") }, ["id"]) },
   { name: "set_custom_instructions", description: "Save the standing instructions the meeting assistant should follow. Pass an empty string to clear them.", inputSchema: obj({ text: str("Instruction text.") }, ["text"]) },

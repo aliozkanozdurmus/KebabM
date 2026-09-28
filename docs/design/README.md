@@ -34,8 +34,8 @@ this application is not affiliated with those companies. No reference company lo
 
 ## Logo
 
-The original ZaiqoM mark was generated using the built-in ChatGPT image tool.
-Source: `public/brand/zaiqom-mark.png`; [generation prompt](logo-prompt.md).
+The original KebabM mark was generated using the built-in ChatGPT image tool.
+Source: `public/brand/kebabm-mark.png`; [generation prompt](logo-prompt.md).
 `BrandMark` serves the launcher, live overlay, setup, startup, about and appearance previews.
 The same source generates macOS ICNS, Windows ICO and PNG/tray sizes with Tauri's icon CLI.
 Legacy public PNG aliases and favicon.ico also carry the new mark.

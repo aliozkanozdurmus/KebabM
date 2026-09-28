@@ -2,6 +2,7 @@ pub mod device_default;
 pub mod device_manager;
 pub mod encoder;
 pub mod mic_capture;
+mod input_stream;
 pub mod recorder;
 pub mod resampler;
 pub mod session_monitor;
@@ -62,11 +63,11 @@ pub struct AudioCaptureManager {
     /// Stop flag for the system capture thread
     stop_flag: Arc<AtomicBool>,
     /// The cpal stream handle for mic capture (dropping stops the stream)
-    mic_stream: Option<cpal::Stream>,
+    mic_stream: Option<input_stream::InputStream>,
     /// The system capture thread handle (WASAPI loopback)
     system_thread: Option<std::thread::JoinHandle<()>>,
     /// System capture via input device (cpal stream, for virtual cables tagged as System)
-    system_input_stream: Option<cpal::Stream>,
+    system_input_stream: Option<input_stream::InputStream>,
     /// Active recorder (if recording is enabled)
     recorder: Option<SharedRecorder>,
     /// Current meeting ID for recording file naming
@@ -85,7 +86,7 @@ pub struct AudioCaptureManager {
     system_peak: f32,
     // -- Audio test state --
     /// Temporary test stream for mic device testing
-    pub test_stream: Option<cpal::Stream>,
+    pub test_stream: Option<input_stream::InputStream>,
     /// Temporary test thread for system audio (WASAPI loopback) testing
     pub test_system_thread: Option<std::thread::JoinHandle<()>>,
     /// Stop flag for system audio test thread
@@ -249,8 +250,15 @@ impl AudioCaptureManager {
 
         // Wait for system capture thread to finish (with timeout)
         if let Some(thread) = self.system_thread.take() {
-            // Give the thread a moment to stop, then move on
-            let _ = thread.join();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            while !thread.is_finished() && std::time::Instant::now() < deadline {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            if thread.is_finished() {
+                let _ = thread.join();
+            } else {
+                log::warn!("System audio driver did not stop within two seconds; stop signal remains set");
+            }
         }
 
         // Stop recording — capture info for post-meeting pipeline

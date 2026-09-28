@@ -1,12 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { EvidenceRef } from "./types";
-export interface Coverage { revision: string; scannedAt: string; indexedFiles: number; reusedFiles: number; chunks: number; gitAware: boolean; excluded: { path: string; reason: string }[]; searchMode: string; freshness?: "current" | "stale" | "unavailable"; freshnessCheckedAt?: string }
+export interface Coverage { revision: string; scannedAt: string; indexedFiles: number; reusedFiles: number; chunks: number; gitAware: boolean; excluded: { path: string; reason: string }[]; searchMode: string; freshness?: "current" | "stale" | "unavailable"; freshnessCheckedAt?: string; freshnessError?: string | null; semantic?: { provider: string; model: string; embedded: number; total: number; ready: boolean } }
 export interface EmbeddingConfig { provider: "lexical" | "gemini" | "ollama"; model: string; dimensions: number; baseUrl: string }
 export interface KnowledgeHit { evidence: EvidenceRef; text: string; score: number }
 export interface MemoryItem { id: string; text: string; status: string; evidence: EvidenceRef[]; updatedAt: string }
 export interface ProjectMemory { questions: MemoryItem[]; decisions: MemoryItem[] }
 export type PreparationKind = "return" | "rehearsal" | "handbook";
-export interface Preparation { text: string; evidence: EvidenceRef[]; revision: string; createdAt: string; searchDegraded?: boolean }
+export interface Preparation { text: string; evidence: EvidenceRef[]; revision: string; createdAt: string; searchDegraded?: boolean; searchReason?: string }
 export const knowledge = {
   coverage: async (id: string) => JSON.parse(await invoke<string>("project_knowledge_status", { id })) as Coverage,
   config: (id: string, config?: EmbeddingConfig) => invoke<EmbeddingConfig>("project_embedding_config", { id, config }),

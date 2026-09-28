@@ -741,18 +741,10 @@ export const useConfigStore = create<ConfigState>((set) => ({
         console.log("[configStore] Migrated legacy audio config to meetingAudioConfig");
       }
 
-      // Migrate whisper_cpp → correct defaults (whisper_cpp is batch-only, not for live STT)
-      // Only run on first load to avoid overwriting user settings mid-meeting.
+      // Repair incompatible native/browser combinations on first load.
+      // Whisper supports live dual-pass transcription; preserve that selection.
       if (!alreadyLoaded && resolvedMeetingConfig) {
         let migrated = false;
-        if ((resolvedMeetingConfig.you.stt_provider as string) === "whisper_cpp") {
-          resolvedMeetingConfig.you = { ...resolvedMeetingConfig.you, stt_provider: "web_speech", local_model_id: undefined };
-          migrated = true;
-        }
-        if ((resolvedMeetingConfig.them.stt_provider as string) === "whisper_cpp") {
-          resolvedMeetingConfig.them = { ...resolvedMeetingConfig.them, stt_provider: "deepgram", local_model_id: undefined };
-          migrated = true;
-        }
         // windows_native only works with mic input; migrate Them (non-input) away from it
         if (
           (resolvedMeetingConfig.them.stt_provider as string) === "windows_native" &&

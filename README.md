@@ -1,4 +1,4 @@
-# ZaiqoM-MeetingHelper
+# KebabM
 
 Seçilen projenin kodunu, dokümanlarını ve kayıtlı toplantılarını kullanarak toplantı sırasında kısa, kaynaklı cevaplar hazırlayan kişisel masaüstü asistanı. Tauri 2 + Rust + React. macOS, Windows ve Linux masaüstü paketleri.
 
@@ -57,4 +57,4 @@ Mac/Windows/Linux kontrol ve paket iş akışları `.github/workflows/` altında
 
 ## Download desktop installers
 
-Published installers and SHA-256 checksums are available on [GitHub Releases](https://github.com/aliozkanozdurmus/ZaiqoM-MeetingHelper/releases). Windows uses an NSIS `.exe`, macOS Apple Silicon uses a `.dmg`, and Linux x64 uses `.AppImage` or `.deb` (Ubuntu 24.04 / glibc 2.39 or newer). Initial packages do not have trusted publisher signing/notarization; signed automatic updates remain disabled. Build status and remaining runtime acceptance are documented in each release.
+Published installers and SHA-256 checksums are available on [GitHub Releases](https://github.com/aliozkanozdurmus/KebabM/releases). Windows uses an NSIS `.exe`, macOS Apple Silicon uses a `.dmg`, and Linux x64 uses `.AppImage` or `.deb` (Ubuntu 24.04 / glibc 2.39 or newer). Initial packages do not have trusted publisher signing/notarization; signed automatic updates remain disabled. Build status and remaining runtime acceptance are documented in each release.

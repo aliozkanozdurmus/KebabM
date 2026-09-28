@@ -147,7 +147,7 @@ export function OverlayView() {
     showLauncherWindow().catch(() => {});
   }, [setCurrentView]);
 
-  const meetingTitle = activeMeeting?.title || "ZaiqoM-MeetingHelper";
+  const meetingTitle = activeMeeting?.title || "KebabM";
 
   return (
     <div className="app-surface overlay-bg flex h-full flex-col border border-[hsl(var(--border))]" style={{ background: `hsl(var(--background) / ${overlayOpacity})`, boxShadow: "0 2px 6px rgba(0,0,0,0.3)" }}>

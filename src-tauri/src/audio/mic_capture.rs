@@ -6,14 +6,16 @@ use cpal::{SampleFormat, Stream};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 
+use super::input_stream::InputStream;
 use super::resampler::resample;
 use super::{AudioChunk, AudioSource};
+use std::sync::atomic::Ordering;
 
 /// Target sample rate for all audio output
 const TARGET_SAMPLE_RATE: u32 = 16000;
 
 /// Start capturing audio from the specified input device.
-/// Returns a cpal::Stream handle — dropping it will stop the stream.
+/// Returns an owner-thread handle — dropping it requests stream shutdown.
 ///
 /// Audio is resampled to 16kHz mono 16-bit PCM and sent as AudioChunk
 /// through the provided mpsc channel. The `source` tag determines whether
@@ -22,34 +24,72 @@ pub fn start_mic_capture(
     device_id: &str,
     tx: mpsc::Sender<AudioChunk>,
     source: AudioSource,
-) -> Result<Stream, String> {
-    let device = super::device_manager::find_input_device(device_id)?;
-    let config = device.default_input_config().map_err(|e| format!("Input configuration: {e}"))?;
-    let rate = config.sample_rate();
-    let channels = config.channels();
-    let stream = build_pcm_stream(&device, config, move |data| {
-        handle_mic_data_i16(data, rate, channels, &tx, &source);
-    })?;
-    stream.play().map_err(|e| format!("Start microphone: {e}"))?;
-    Ok(stream)
+) -> Result<InputStream, String> {
+    let device_id = device_id.to_string();
+    InputStream::open(move |active| {
+        let device = super::device_manager::find_input_device(&device_id)?;
+        let config = device
+            .default_input_config()
+            .map_err(|e| format!("Input configuration: {e}"))?;
+        let rate = config.sample_rate();
+        let channels = config.channels();
+        let callback_active = active.clone();
+        let stream = build_pcm_stream(&device, config, move |data| {
+            if !callback_active.load(Ordering::SeqCst) {
+                return;
+            }
+            handle_mic_data_i16(data, rate, channels, &tx, &source);
+        })?;
+        if !active.load(Ordering::SeqCst) {
+            return Err("Microphone opening cancelled".into());
+        }
+        stream
+            .play()
+            .map_err(|e| format!("Start microphone: {e}"))?;
+        Ok(stream)
+    })
 }
 
 /// One hardware stream when both roles share an input device.
-pub fn start_mic_capture_dual(device_id: &str, tx: mpsc::Sender<AudioChunk>) -> Result<Stream, String> {
-    let device = super::device_manager::find_input_device(device_id)?;
-    let config = device.default_input_config().map_err(|e| format!("Input configuration: {e}"))?;
-    let rate = config.sample_rate();
-    let channels = config.channels();
-    let stream = build_pcm_stream(&device, config, move |data| {
-        if data.is_empty() { return; }
-        let pcm_data = resample(data, rate, TARGET_SAMPLE_RATE, channels);
-        let timestamp_ms = current_timestamp_ms();
-        for source in [AudioSource::Mic, AudioSource::System] {
-            let _ = tx.try_send(AudioChunk { pcm_data: pcm_data.clone(), source, timestamp_ms, is_speech: false });
+pub fn start_mic_capture_dual(
+    device_id: &str,
+    tx: mpsc::Sender<AudioChunk>,
+) -> Result<InputStream, String> {
+    let device_id = device_id.to_string();
+    InputStream::open(move |active| {
+        let device = super::device_manager::find_input_device(&device_id)?;
+        let config = device
+            .default_input_config()
+            .map_err(|e| format!("Input configuration: {e}"))?;
+        let rate = config.sample_rate();
+        let channels = config.channels();
+        let callback_active = active.clone();
+        let stream = build_pcm_stream(&device, config, move |data| {
+            if !callback_active.load(Ordering::SeqCst) {
+                return;
+            }
+            if data.is_empty() {
+                return;
+            }
+            let pcm_data = resample(data, rate, TARGET_SAMPLE_RATE, channels);
+            let timestamp_ms = current_timestamp_ms();
+            for source in [AudioSource::Mic, AudioSource::System] {
+                let _ = tx.try_send(AudioChunk {
+                    pcm_data: pcm_data.clone(),
+                    source,
+                    timestamp_ms,
+                    is_speech: false,
+                });
+            }
+        })?;
+        if !active.load(Ordering::SeqCst) {
+            return Err("Microphone opening cancelled".into());
         }
-    })?;
-    stream.play().map_err(|e| format!("Start shared microphone: {e}"))?;
-    Ok(stream)
+        stream
+            .play()
+            .map_err(|e| format!("Start shared microphone: {e}"))?;
+        Ok(stream)
+    })
 }
 
 /// CPAL may select integer or floating PCM formats as the device default.
@@ -61,10 +101,15 @@ pub(crate) fn build_pcm_stream(
 ) -> Result<Stream, String> {
     macro_rules! capture {
         ($sample:ty) => {
-            device.build_input_stream(config.into(), move |data: &[$sample], _: &cpal::InputCallbackInfo| {
-                let pcm = to_pcm16(data);
-                on_data(&pcm);
-            }, |error| log::error!("Audio stream failed: {error}"), None)
+            device.build_input_stream(
+                config.into(),
+                move |data: &[$sample], _: &cpal::InputCallbackInfo| {
+                    let pcm = to_pcm16(data);
+                    on_data(&pcm);
+                },
+                |error| log::error!("Audio stream failed: {error}"),
+                None,
+            )
         };
     }
     let stream = match config.sample_format() {
@@ -86,12 +131,20 @@ pub(crate) fn build_pcm_stream(
 }
 
 fn to_pcm16<T: cpal::Sample>(data: &[T]) -> Vec<i16>
-where f64: cpal::FromSample<T> {
-    data.iter().map(|sample| {
-        let value = sample.to_sample::<f64>();
-        // Saturate out-of-range floating input; NaN becomes silence.
-        if value.is_nan() { 0 } else { (value.clamp(-1.0, 1.0) * 32768.0) as i16 }
-    }).collect()
+where
+    f64: cpal::FromSample<T>,
+{
+    data.iter()
+        .map(|sample| {
+            let value = sample.to_sample::<f64>();
+            // Saturate out-of-range floating input; NaN becomes silence.
+            if value.is_nan() {
+                0
+            } else {
+                (value.clamp(-1.0, 1.0) * 32768.0) as i16
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -99,11 +152,30 @@ mod tests {
     use super::*;
     #[test]
     fn capture_formats_preserve_silence_polarity_and_saturation() {
-        assert_eq!(to_pcm16(&[i16::MIN, -1, 0, 1, i16::MAX]), vec![i16::MIN, -1, 0, 1, i16::MAX]);
-        assert_eq!(to_pcm16(&[0_u16, 32768, 65535]), vec![i16::MIN, 0, i16::MAX]);
-        assert_eq!(to_pcm16(&[i32::MIN, 0, i32::MAX]), vec![i16::MIN, 0, i16::MAX]);
-        assert_eq!(to_pcm16(&[-2.0_f32, 0.0, 0.5, 2.0, f32::NAN]), vec![i16::MIN, 0, 16384, i16::MAX, 0]);
-        assert_eq!(to_pcm16(&[cpal::I24::new(-8388608).unwrap(), cpal::I24::new(0).unwrap(), cpal::I24::new(8388607).unwrap()]), vec![i16::MIN, 0, i16::MAX]);
+        assert_eq!(
+            to_pcm16(&[i16::MIN, -1, 0, 1, i16::MAX]),
+            vec![i16::MIN, -1, 0, 1, i16::MAX]
+        );
+        assert_eq!(
+            to_pcm16(&[0_u16, 32768, 65535]),
+            vec![i16::MIN, 0, i16::MAX]
+        );
+        assert_eq!(
+            to_pcm16(&[i32::MIN, 0, i32::MAX]),
+            vec![i16::MIN, 0, i16::MAX]
+        );
+        assert_eq!(
+            to_pcm16(&[-2.0_f32, 0.0, 0.5, 2.0, f32::NAN]),
+            vec![i16::MIN, 0, 16384, i16::MAX, 0]
+        );
+        assert_eq!(
+            to_pcm16(&[
+                cpal::I24::new(-8388608).unwrap(),
+                cpal::I24::new(0).unwrap(),
+                cpal::I24::new(8388607).unwrap()
+            ]),
+            vec![i16::MIN, 0, i16::MAX]
+        );
     }
 }
 

@@ -1,4 +1,4 @@
-# ZaiqoM-MeetingHelper MCP
+# KebabM MCP
 
 Masaüstü uygulamasını resmi MCP TypeScript SDK üzerinden yöneten yerel stdio sunucusu. Node 24 ve çalışan native uygulama gerekir. `npm run dev` tek başına yeterli değildir. MCP host'unda 72 araç, 4 kaynak, 3 kaynak şablonu ve 3 hazırlık prompt'u sunulur.
 
@@ -11,7 +11,7 @@ Repo kökündeki `.mcp.json`, çalışma dizini bu repo olan uyumlu host'lar iç
   "mcpServers": {
     "zaiqo": {
       "command": "node",
-      "args": ["/absolute/path/to/ZaiqoM-MeetingHelper/mcp/server.mjs"]
+      "args": ["/absolute/path/to/KebabM/mcp/server.mjs"]
     }
   }
 }
@@ -87,3 +87,31 @@ Tam kabul durumu: [plan.md](../plan.md), [kabul protokolü](../docs/acceptance.m
 Supported appearances: `ibm`, `liquid-glass`, `apple`, `linear`, `notion`, `material`,
 `github`, `terminal`. Color mode (`light`, `dark`, `system`) is independent. Read current
 settings before updating; the selection is persisted and synchronized across windows.
+
+### Runtime status and window diagnostics
+
+`status.active_session_id` identifies the meeting currently owned by the running app; null means no active meeting. The legacy `open_meeting` field is a saved live meeting with no end time and can remain after an interrupted session. It is not proof of an active session or audio capture. Use `audio_status` for capture state.
+
+`status.windows` reports each Tauri window's `label`, `visible`, `minimized`, and `focused` flags. A null flag means the native query failed. These flags describe the app's window state, not proof that screen capture or accessibility automation can reach it.
+
+### Retrieval diagnostics and evaluation
+
+`search_knowledge` keeps returning a hit array by default. Set
+`includeDiagnostics: true` to receive `{ hits, degraded, reason, retrievalMs }`.
+`degraded` includes keyword fallback and partial semantic coverage; `reason`
+explains the condition. A populated result array alone does not prove semantic
+retrieval ran successfully. Scores remain ranking signals, not confidence.
+
+Run the installed service against a private, revision-pinned fixture:
+
+```sh
+node scripts/evaluate-live-knowledge.mjs PROJECT_ID REPO FIXTURE.json artifacts/retrieval-report.json
+```
+
+This makes embedding requests using the configured provider. It checks a clean
+worktree and fixture anchors before querying, records per-query degradation,
+and requires the expected source passage in the first eight results. A failing
+recall threshold or degraded request returns a nonzero exit code. Unknown and
+conflicting scenarios still require answer review; retrieval does not establish
+answer correctness or live production state. Keep company fixtures and reports
+untracked.

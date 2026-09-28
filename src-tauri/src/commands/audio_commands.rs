@@ -960,11 +960,11 @@ pub async fn start_capture_per_party(
     let startup = async {
         if let Some(provider) = you_stt_provider.as_mut() {
             provider.start_stream(you_stt_tx).await
-                .map_err(|_| format!("Could not start your {} speech service. Check its connection and credentials.", you.stt_provider))?;
+                .map_err(|error| format!("Could not start your {} speech service: {error}", you.stt_provider))?;
         }
         if let Some(provider) = them_stt_provider.as_mut() {
             provider.start_stream(them_stt_tx).await
-                .map_err(|_| format!("Could not start the other speaker's {} speech service. Check its connection and credentials.", them.stt_provider))?;
+                .map_err(|error| format!("Could not start the other speaker's {} speech service: {error}", them.stt_provider))?;
         }
         let mut guard = state.audio.lock()
             .map_err(|_| "Audio state lock poisoned".to_string())?;
@@ -1424,14 +1424,9 @@ async fn create_stt_provider_for_party(
                     p.set_language(&lang);
                     Ok(Some(Box::new(p)))
                 }
-                Err(e) => {
-                    log::warn!(
-                        "WhisperCpp: {} — no transcription for this party. \
-                         Download the model in Settings.",
-                        e
-                    );
-                    Ok(None)
-                }
+                Err(e) => Err(format!(
+                    "{party_role}: local Whisper model unavailable ({e}). Download a model in Audio settings before starting transcription."
+                )),
             }
         }
         STTProviderType::WindowsNative => {
@@ -1948,4 +1943,3 @@ pub async fn get_mute_status(app: AppHandle) -> Result<String, String> {
     });
     serde_json::to_string(&status).map_err(|e| format!("Failed to serialize: {}", e))
 }
-

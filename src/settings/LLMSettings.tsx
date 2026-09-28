@@ -508,7 +508,7 @@ export function LLMSettings() {
             </div>
           </div>
           <p className="mt-1.5 text-xs text-muted-foreground">
-            Stored securely in your system keychain
+            Stored locally on this device. macOS uses an owner-only file without Keychain prompts.
           </p>
         </div>
       )}

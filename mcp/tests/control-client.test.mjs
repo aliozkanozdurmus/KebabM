@@ -29,6 +29,10 @@ test('private loopback transport validates config, suppresses secrets and aborts
       return;
     }
     res.setHeader('Content-Type', 'application/json');
+    if (mode === 'delayed') {
+      setTimeout(() => res.end(JSON.stringify({ ok: true, result: { completed: true } })), 80);
+      return;
+    }
     if (mode === 'failure') { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: 'arbitrary-private-value' })); }
     else res.end(JSON.stringify({ ok: true, result: { connected: true } }));
   });
@@ -48,6 +52,9 @@ test('private loopback transport validates config, suppresses secrets and aborts
   const config = { host: '127.0.0.1', port, token };
   await writeFile(path, JSON.stringify(config), { mode: 0o600 });
   assert.deepEqual(await callApp('status'), { connected: true });
+  mode = 'delayed';
+  assert.deepEqual(await callApp('embed_project', {}, { timeoutMs: 1000 }), { completed: true });
+  await assert.rejects(callApp('embed_project', {}, { timeoutMs: 10 }), /cancelled or timed out/);
   mode = 'failure';
   await assert.rejects(callApp('store_secret', { key: 'arbitrary-private-value' }), error => !error.message.includes('arbitrary-private-value'));
   await writeFile(path, JSON.stringify({ ...config, host: 'example.com' }));

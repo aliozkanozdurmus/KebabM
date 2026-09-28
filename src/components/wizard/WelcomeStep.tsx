@@ -147,7 +147,7 @@ export function WelcomeStep({ onDetectionComplete }: WelcomeStepProps) {
           <BrandMark className="h-20 w-20" />
         </div>
         <h2 className="text-2xl font-semibold text-foreground">
-          Welcome to ZaiqoM-MeetingHelper
+          Welcome to KebabM
         </h2>
         <p className="mt-3 text-sm text-muted-foreground leading-relaxed">
           Let's get your AI meeting assistant set up. This will only take a

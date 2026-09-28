@@ -94,15 +94,33 @@ pub fn schema(conn: &Connection) -> rusqlite::Result<()> {
         INSERT INTO project_chunks_fts(rowid,path,text) VALUES(new.rowid,new.path,new.text); END;")
 }
 
-fn git(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
-    Command::new("git")
-        .arg("-C")
-        .arg(root)
-        .args(args)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| o.stdout)
+fn git(root: &Path, args: &[&str]) -> Result<Option<Vec<u8>>, String> {
+    use std::{io::Read, process::Stdio, time::{Duration, Instant}};
+    let mut child = match Command::new("git")
+        .arg("-C").arg(root).args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn() {
+        Ok(child) => child,
+        Err(error) if error.kind()==std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("Could not start Git to inspect the project".into()),
+    };
+    // Drain stdout concurrently: a large file list must not fill the pipe and deadlock.
+    let mut stdout=child.stdout.take().ok_or("Git output unavailable")?;
+    let reader=std::thread::spawn(move || {let mut output=Vec::new(); stdout.read_to_end(&mut output).map(|_|output)});
+    let started=Instant::now();
+    let status=loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed()<Duration::from_secs(15) => std::thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _=child.kill(); let _=child.wait();
+                return Err("Project folder inspection timed out. Check macOS folder access or whether the drive is available, then retry. The saved index is unchanged.".into());
+            }
+        }
+    };
+    let output=reader.join().map_err(|_| "Git output reader failed")?.map_err(|_| "Could not read Git output")?;
+    Ok(status.success().then_some(output))
 }
 pub fn content_hash(text: &str) -> String {
     Sha256::digest(text.as_bytes())
@@ -183,7 +201,7 @@ pub fn scan(root: &Path) -> Result<Scan, String> {
             "--others",
             "--exclude-standard",
         ],
-    );
+    )?;
     let git_aware = listed.is_some();
     let paths: BTreeSet<String> = if let Some(bytes) = listed {
         bytes
@@ -212,15 +230,15 @@ pub fn scan(root: &Path) -> Result<Scan, String> {
         }
         paths
     };
-    let revision = git(&root, &["rev-parse", "HEAD"])
+    let revision = git(&root, &["rev-parse", "HEAD"])?
         .map(|v| String::from_utf8_lossy(&v).trim().to_string())
         .unwrap_or_else(|| "unversioned".into());
-    let dirty: BTreeSet<String> = git(&root, &["diff", "--name-only", "-z", "HEAD"])
+    let dirty: BTreeSet<String> = git(&root, &["diff", "--no-ext-diff", "--name-only", "-z", "HEAD"])?
         .unwrap_or_default()
         .split(|b| *b == 0)
         .map(|v| String::from_utf8_lossy(v).into_owned())
         .collect();
-    let tracked: BTreeSet<String> = git(&root, &["ls-files", "-z"])
+    let tracked: BTreeSet<String> = git(&root, &["ls-files", "-z"])?
         .unwrap_or_default()
         .split(|b| *b == 0)
         .map(|v| String::from_utf8_lossy(v).into_owned())
@@ -605,6 +623,22 @@ mod tests {
         assert_eq!(search(&conn, &p.id, "pipeline", 8).unwrap().len(), 1);
     }
     #[test]
+    fn precise_lexical_evidence_survives_fusion_without_duplicate_slots() {
+        let make = |id: &str, text: &str| Hit {
+            evidence: EvidenceRef { id: id.into(), project_id: "p".into(), path: format!("{id}.md"), start_line: 1, end_line: 2, revision: "rev".into(), content_hash: content_hash(text), source_type: "document".into(), dirty: false },
+            text: text.into(), score: 0.01,
+        };
+        let precise = make("precise", "The worker retries at most three times.");
+        let semantic = make("semantic", "How transient failures are handled.");
+        let duplicate = make("copy", &precise.text);
+        let other = make("other", "Additional implementation evidence.");
+        let result = select_evidence(vec![precise.clone()], vec![semantic.clone(), duplicate, other.clone(), precise], 3);
+        assert_eq!(result.iter().map(|h| h.evidence.id.as_str()).collect::<Vec<_>>(), vec!["precise", "semantic", "other"]);
+        assert!(select_evidence(vec![other.clone()], vec![semantic.clone()], 0).is_empty());
+        assert_eq!(select_evidence(vec![], vec![semantic, other], 2).len(), 2);
+    }
+
+    #[test]
     fn freshness_detects_edits_deletions_additions_and_revision_changes() {
         let mut scan = Scan {
             files: vec![SourceFile {
@@ -651,6 +685,7 @@ pub fn hybrid_search(
     limit: usize,
 ) -> Result<Vec<Hit>, String> {
     let lexical = search(conn, project, question, 40)?;
+    let anchors: Vec<_> = lexical.iter().take((limit / 4).min(2)).cloned().collect();
     let mut ranked: HashMap<String, (f64, Hit)> = HashMap::new();
     for (rank, hit) in lexical.into_iter().enumerate() {
         ranked.insert(hit.evidence.id.clone(), (1.0 / (61 + rank) as f64, hit));
@@ -705,15 +740,23 @@ pub fn hybrid_search(
             .then(a.1.evidence.path.cmp(&b.1.evidence.path))
             .then(a.1.evidence.start_line.cmp(&b.1.evidence.start_line))
     });
+    // Reserve a small part of the context for the strongest lexical evidence.
+    // RRF alone can bury a precise match that appears in only one channel below
+    // passages with mediocre ranks in both. The remaining slots stay hybrid.
+    let fused = fused.into_iter().map(|(score, mut hit)| {
+        hit.score = score;
+        hit
+    }).collect();
+    Ok(select_evidence(anchors, fused, limit))
+}
+
+fn select_evidence(anchors: Vec<Hit>, fused: Vec<Hit>, limit: usize) -> Vec<Hit> {
+    let scores: HashMap<_, _> = fused.iter().map(|hit| (hit.evidence.id.clone(), hit.score)).collect();
     let mut seen = BTreeSet::new();
-    Ok(fused
-        .into_iter()
-        .filter_map(|(score, mut hit)| {
-            hit.score = score;
-            seen.insert(content_hash(&hit.text)).then_some(hit)
-        })
-        .take(limit)
-        .collect())
+    anchors.into_iter().chain(fused).filter_map(|mut hit| {
+        if let Some(score) = scores.get(&hit.evidence.id) { hit.score = *score; }
+        seen.insert(content_hash(&hit.text)).then_some(hit)
+    }).take(limit).collect()
 }
 
 // A failed or cancelled indexing task always releases its project slot.

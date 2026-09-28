@@ -25,9 +25,9 @@ pub fn build_tooltip(
     match state {
         TrayState::Idle => {
             if let Some(text) = custom_text {
-                format!("ZaiqoM-MeetingHelper — Idle · {}", text)
+                format!("KebabM — Idle · {}", text)
             } else {
-                "ZaiqoM-MeetingHelper — Idle".to_string()
+                "KebabM — Idle".to_string()
             }
         }
         TrayState::Recording => {
@@ -35,29 +35,29 @@ pub fn build_tooltip(
                 .map(|s| format_elapsed(s))
                 .unwrap_or_else(|| "00:00".to_string());
             if is_muted {
-                format!("ZaiqoM-MeetingHelper — Recording (Mic Muted) · {} elapsed", elapsed)
+                format!("KebabM — Recording (Mic Muted) · {} elapsed", elapsed)
             } else {
-                format!("ZaiqoM-MeetingHelper — Recording · {} elapsed", elapsed)
+                format!("KebabM — Recording · {} elapsed", elapsed)
             }
         }
         TrayState::Muted => {
             let elapsed = meeting_start
                 .map(|s| format_elapsed(s))
                 .unwrap_or_else(|| "00:00".to_string());
-            format!("ZaiqoM-MeetingHelper — Recording (Mic Muted) · {} elapsed", elapsed)
+            format!("KebabM — Recording (Mic Muted) · {} elapsed", elapsed)
         }
         TrayState::Stealth => {
             let elapsed = meeting_start
                 .map(|s| format_elapsed(s))
                 .unwrap_or_else(|| "00:00".to_string());
-            format!("ZaiqoM-MeetingHelper — Stealth · {} elapsed", elapsed)
+            format!("KebabM — Stealth · {} elapsed", elapsed)
         }
-        TrayState::AiProcessing => "ZaiqoM-MeetingHelper — AI Processing...".to_string(),
+        TrayState::AiProcessing => "KebabM — AI Processing...".to_string(),
         TrayState::Indexing => {
             if let Some(text) = custom_text {
-                format!("ZaiqoM-MeetingHelper — {}", text)
+                format!("KebabM — {}", text)
             } else {
-                "ZaiqoM-MeetingHelper — Indexing files...".to_string()
+                "KebabM — Indexing files...".to_string()
             }
         }
     }

@@ -7,11 +7,12 @@ const GENERAL = "general";
 
 interface MeetingSetupModalProps {
   open: boolean;
+  meetingTitle?: string;
   onStart: (choice: { projectId: string } | { context: string }) => void;
   onCancel: () => void;
 }
 
-export function MeetingSetupModal({ open, onStart, onCancel }: MeetingSetupModalProps) {
+export function MeetingSetupModal({ open, meetingTitle, onStart, onCancel }: MeetingSetupModalProps) {
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string>(GENERAL);
   const [context, setContext] = useState("");
@@ -69,7 +70,7 @@ export function MeetingSetupModal({ open, onStart, onCancel }: MeetingSetupModal
       <div className="w-[480px] max-w-[calc(100vw-32px)] max-h-[92vh] overflow-auto border border-border bg-card">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
-            <h2 className="text-sm font-semibold text-foreground">Start meeting</h2>
+            <h2 className="text-sm font-semibold text-foreground">{meetingTitle || "Start meeting"}</h2>
             <p className="text-xs text-muted-foreground">Pick a project, or General and paste the context for this meeting.</p>
           </div>
           <button onClick={onCancel} className="p-1 text-muted-foreground hover:text-foreground cursor-pointer" aria-label="Cancel">
@@ -79,7 +80,7 @@ export function MeetingSetupModal({ open, onStart, onCancel }: MeetingSetupModal
         <div className="max-h-60 space-y-1 overflow-y-auto px-3 py-3">
           <button
             onClick={() => setSelectedId(GENERAL)}
-            className={`block w-full border px-3 py-2 text-left cursor-pointer ${selectedId === GENERAL ? "border-[#0f62fe] bg-[#0f62fe] text-white" : "border-border text-foreground"}`}
+            className={`block w-full border px-3 py-2 text-left cursor-pointer ${selectedId === GENERAL ? "border-primary bg-primary text-primary-foreground" : "border-border text-foreground"}`}
           >
             <div className="text-sm">General</div>
             <div className={`text-xs ${selectedId === GENERAL ? "text-white/80" : "text-muted-foreground"}`}>Paste the meeting context yourself</div>
@@ -99,7 +100,7 @@ export function MeetingSetupModal({ open, onStart, onCancel }: MeetingSetupModal
               <button
                 key={project.id}
                 onClick={() => setSelectedId(project.id)}
-                className={`block w-full border px-3 py-2 text-left cursor-pointer ${selected ? "border-[#0f62fe] bg-[#0f62fe] text-white" : "border-border text-foreground"}`}
+                className={`block w-full border px-3 py-2 text-left cursor-pointer ${selected ? "border-primary bg-primary text-primary-foreground" : "border-border text-foreground"}`}
               >
                 <div className="text-sm">{project.name}</div>
                 <div className={`truncate text-xs ${selected ? "text-white/80" : "text-muted-foreground"}`}>{project.root_path}</div>
@@ -116,7 +117,7 @@ export function MeetingSetupModal({ open, onStart, onCancel }: MeetingSetupModal
           <button
             onClick={start}
             disabled={starting}
-            className="inline-flex flex-1 items-center justify-center gap-2 bg-[#0f62fe] px-3 py-2 text-sm text-white disabled:opacity-50 cursor-pointer"
+            className="inline-flex flex-1 items-center justify-center gap-2 bg-primary px-3 py-2 text-sm text-white disabled:opacity-50 cursor-pointer"
           >
             <Play className="h-4 w-4" />
             {starting ? "Starting" : "Start meeting"}

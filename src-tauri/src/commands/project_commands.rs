@@ -102,15 +102,24 @@ pub async fn project_knowledge_status(id: String, state: State<'_, AppState>) ->
         projects::knowledge::scan(std::path::Path::new(&root))
             .map(|scan| projects::knowledge::snapshot_matches(&scan, &revision, &hashes))
     }).await.map_err(|e| e.to_string())?;
+    coverage["freshnessError"] = checked.as_ref().err().map_or(serde_json::Value::Null, |error| serde_json::json!(error));
     coverage["freshness"] = serde_json::json!(match checked { Ok(true) => "current", Ok(false) => "stale", Err(_) => "unavailable" });
     coverage["freshnessCheckedAt"] = serde_json::json!(chrono::Utc::now().to_rfc3339());
+    {
+        let db=lock_db(&state)?;
+        let config=projects::embedding::config(db.connection(),&id)?;
+        let embedded:i64=db.connection().query_row("SELECT count(*) FROM project_vectors v JOIN project_chunks c ON c.id=v.chunk_id WHERE c.project_id=?1 AND v.model_key=?2",rusqlite::params![id,config.key()],|r|r.get(0)).map_err(|e|e.to_string())?;
+        let total:i64=db.connection().query_row("SELECT count(*) FROM project_chunks WHERE project_id=?1",[&id],|r|r.get(0)).map_err(|e|e.to_string())?;
+        coverage["semantic"] = serde_json::json!({"provider":config.provider,"model":config.model,"embedded":embedded,"total":total,"ready":config.provider!="lexical" && total>0 && embedded==total});
+        coverage["searchMode"] = serde_json::json!(if config.provider!="lexical" && total>0 && embedded==total {format!("hybrid:{}",config.key())} else {"lexical".into()});
+    }
     serde_json::to_string(&coverage).map_err(|e| e.to_string())
 }
 
 #[command]
 pub async fn search_project_knowledge(id: String, question: String, state: State<'_, AppState>) -> Result<String, String> {
     let project={let db=lock_db(&state)?;projects::get(db.connection(),&id)?};
-    let (hits,_)=retrieve_project(&state,&project,&question).await?;
+    let (hits,_,_)=retrieve_project(&state,&project,&question).await?;
     serde_json::to_string(&hits).map_err(|e|e.to_string())
 }
 
@@ -242,38 +251,64 @@ pub async fn embed_project(id:String,app:AppHandle)->Result<usize,String>{
         let rows=stmt.query_map(rusqlite::params![id,config.key()],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?))).map_err(|e|e.to_string())?;
         (config,rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?)
     };
-    let key=projects::embedding::api_key(&state);
-    let mut staged=Vec::new();
+    let key=if config.provider=="gemini" && !pending.is_empty() {projects::embedding::api_key(&state).await?} else {None};
+    let mut completed=0;
     for batch in pending.chunks(16) {
         let texts=batch.iter().map(|(_,path,text)|format!("title: {path} | text: {text}")).collect();
-        let vectors=projects::embedding::embed(&config,key.as_deref(),texts,false).await?;
+        let vectors=projects::embedding::embed(&config,key.as_deref(),texts,false).await
+            .map_err(|e|format!("{e}. {completed} passages saved in this run. Resume indexing to continue from the last saved batch."))?;
         if vectors.len()!=batch.len(){return Err("Embedding response count mismatch; previous vectors retained".into());}
-        for ((chunk,_,_),vector) in batch.iter().zip(vectors) {staged.push((chunk.clone(),serde_json::to_string(&vector).map_err(|e|e.to_string())?));}
-        emit_progress(&app,"embedding",&format!("{} / {} source chunks embedded",staged.len(),pending.len()));
+        // Keep every validated batch. A rate limit or restart must not discard paid work.
+        // The index lease prevents source replacement while these chunk IDs are saved.
+        {
+            let db=lock_db(&state)?;
+            let checkpoint=batch.iter().zip(vectors).map(|((chunk,_,_),vector)|(chunk.clone(),vector)).collect::<Vec<_>>();
+            projects::embedding::save_batch(db.connection(),&config,&checkpoint)?;
+        }
+        completed+=batch.len();
+        let _=app.emit("project-embedding-progress",serde_json::json!({"projectId":id,"completed":completed,"total":pending.len()}));
     }
     let db=lock_db(&state)?;
     let tx=db.connection().unchecked_transaction().map_err(|e|e.to_string())?;
-    for (chunk,vector) in &staged {tx.execute("INSERT OR REPLACE INTO project_vectors VALUES (?1,?2,?3)",rusqlite::params![chunk,config.key(),vector]).map_err(|e|e.to_string())?;}
     let encoded:String=tx.query_row("SELECT coverage FROM project_knowledge WHERE project_id=?1",[&id],|r|r.get(0)).map_err(|e|e.to_string())?;
     let mut coverage:projects::knowledge::Coverage=serde_json::from_str(&encoded).map_err(|e|e.to_string())?;
     coverage.search_mode=format!("hybrid:{}",config.key());
     tx.execute("UPDATE project_knowledge SET coverage=?1 WHERE project_id=?2",rusqlite::params![serde_json::to_string(&coverage).map_err(|e|e.to_string())?,id]).map_err(|e|e.to_string())?;
     tx.commit().map_err(|e|e.to_string())?;
-    Ok(staged.len())
+    Ok(completed)
 }
 
-pub async fn retrieve_project(state:&AppState,project:&projects::ProjectRecord,question:&str)->Result<(Vec<projects::knowledge::Hit>,bool),String>{
-    let config={let db=lock_db(state)?;projects::preparation::sync_records(db.connection(),&project.id)?;projects::embedding::config(db.connection(),&project.id)?};
-    let key=projects::embedding::api_key(state);
-    let vector=if config.provider!="lexical" {
-        tokio::time::timeout(std::time::Duration::from_secs(2),projects::embedding::embed(&config,key.as_deref(),vec![question.into()],true))
-            .await.ok().and_then(Result::ok).and_then(|mut v|v.pop())
-    } else {None};
+pub async fn retrieve_project(state:&AppState,project:&projects::ProjectRecord,question:&str)->Result<(Vec<projects::knowledge::Hit>,bool,Option<String>),String>{
+    let (config,count,total)={
+        let db=lock_db(state)?;
+        projects::preparation::sync_records(db.connection(),&project.id)?;
+        let config=projects::embedding::config(db.connection(),&project.id)?;
+        let count:i64=db.connection().query_row("SELECT count(*) FROM project_vectors v JOIN project_chunks c ON v.chunk_id=c.id WHERE c.project_id=?1 AND v.model_key=?2",rusqlite::params![project.id,config.key()],|r|r.get(0)).map_err(|e|e.to_string())?;
+        let total:i64=db.connection().query_row("SELECT count(*) FROM project_chunks WHERE project_id=?1",[&project.id],|r|r.get(0)).map_err(|e|e.to_string())?;
+        (config,count,total)
+    };
+    let (vector,reason)=if config.provider=="lexical" {
+        (None,Some("Keyword search selected. Choose an embedding provider in project preparation to enable semantic search.".to_string()))
+    } else if count==0 {
+        (None,Some("Semantic index is not built yet. Build it in project preparation; keyword search is active.".to_string()))
+    } else {
+        // Bound OS access as well as the request. A missing index never needs a paid query.
+        let result=tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            let key=if config.provider=="gemini" {projects::embedding::api_key(state).await?} else {None};
+            projects::embedding::embed(&config,key.as_deref(),vec![question.into()],true).await
+        }).await;
+        match result {
+            Ok(Ok(mut vectors)) if vectors.len()==1 => (vectors.pop(),if count<total {
+                Some(format!("Semantic index covers {count} of {total} passages. Resume indexing in project preparation; keyword search covers the remaining passages."))
+            } else {None}),
+            Ok(Ok(_)) => (None,Some("Semantic service returned an empty or invalid result. Keyword search used for this answer.".into())),
+            Ok(Err(error)) => (None,Some(format!("Semantic search: {error}. Keyword search used for this answer."))),
+            Err(_) => (None,Some("Semantic search exceeded the live-answer time limit. Keyword search used for this answer.".into())),
+        }
+    };
     let db=lock_db(state)?;
-    let count:i64=db.connection().query_row("SELECT count(*) FROM project_vectors v JOIN project_chunks c ON v.chunk_id=c.id WHERE c.project_id=?1 AND v.model_key=?2",rusqlite::params![project.id,config.key()],|r|r.get(0)).map_err(|e|e.to_string())?;
-    let total:i64=db.connection().query_row("SELECT count(*) FROM project_chunks WHERE project_id=?1",[&project.id],|r|r.get(0)).map_err(|e|e.to_string())?;
-    let degraded=vector.is_none() || count<total || count==0;
-    Ok((projects::knowledge::hybrid_search(db.connection(),&project.id,question,&config.key(),vector.as_deref(),8)?,degraded))
+    let degraded=reason.is_some();
+    Ok((projects::knowledge::hybrid_search(db.connection(),&project.id,question,&config.key(),vector.as_deref(),8)?,degraded,reason))
 }
 
 #[command]
@@ -354,7 +389,7 @@ pub async fn project_preparation(id:String,kind:String,regenerate:bool,app:AppHa
         }).await.map_err(|e|e.to_string())??; change_note=note;changed=paths;
     }
     let query=if kind=="rehearsal"{"architecture pipeline deployment error retry human review integration decisions"}else{"README architecture pipeline overview deployment decisions"};
-    let (mut hits,degraded)=retrieve_project(&state,&project,query).await?;
+    let (mut hits,degraded,search_reason)=retrieve_project(&state,&project,query).await?;
     if kind=="return" {
         let db=lock_db(&state)?;
         let path="memory://git/recent-changes.txt";
@@ -373,7 +408,7 @@ pub async fn project_preparation(id:String,kind:String,regenerate:bool,app:AppHa
     let now=chrono::Utc::now().to_rfc3339();
     let db=lock_db(&state)?;
     db.connection().execute("INSERT INTO project_preparations VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(project_id,kind) DO UPDATE SET text=excluded.text,evidence=excluded.evidence,revision=excluded.revision,created_at=excluded.created_at",rusqlite::params![id,kind,text,serde_json::to_string(&pack.evidence).map_err(|e|e.to_string())?,revision,now]).map_err(|e|e.to_string())?;
-    Ok(serde_json::json!({"text":text,"evidence":pack.evidence,"revision":revision,"createdAt":now,"searchDegraded":degraded}))
+    Ok(serde_json::json!({"text":text,"evidence":pack.evidence,"revision":revision,"createdAt":now,"searchDegraded":degraded,"searchReason":search_reason}))
 }
 
 #[command]

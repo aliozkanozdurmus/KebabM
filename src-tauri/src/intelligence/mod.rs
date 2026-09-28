@@ -160,6 +160,7 @@ impl IntelligenceEngine {
         identity: RequestIdentity,
         evidence: Vec<crate::projects::knowledge::EvidenceRef>,
         search_degraded: bool,
+        search_reason: Option<String>,
     ) -> Result<(String, crate::llm::provider::CompletionStats), String> {
         let sink = ResponseSink::new(Some(app_handle), identity, cancel_flag.clone());
 
@@ -193,6 +194,7 @@ impl IntelligenceEngine {
                 provider: provider_name.clone(),
                 evidence,
                 search_degraded,
+                search_reason,
                 question: custom_question
                     .map(str::to_owned)
                     .or_else(|| last_question.as_ref().map(|q| q.text.clone())),

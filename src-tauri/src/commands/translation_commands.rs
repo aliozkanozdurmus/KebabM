@@ -15,26 +15,6 @@ pub async fn set_translation_provider(
 ) -> Result<(), String> {
     let state = app.state::<AppState>();
 
-    // Load credentials from CredentialManager into the router
-    if let Some(ref cred_arc) = state.credentials {
-        if let Ok(cred) = cred_arc.lock() {
-            let trans_arc = state.translation.as_ref()
-                .ok_or("Translation router not initialized")?;
-            let mut router = trans_arc.lock()
-                .map_err(|_| "Translation lock poisoned".to_string())?;
-
-            if let Ok(Some(key)) = cred.get_key("translation_microsoft") {
-                router.set_microsoft_credentials(key, region.clone());
-            }
-            if let Ok(Some(key)) = cred.get_key("translation_google") {
-                router.set_google_credentials(key);
-            }
-            if let Ok(Some(key)) = cred.get_key("translation_deepl") {
-                router.set_deepl_credentials(key);
-            }
-        }
-    }
-
     let provider_type = match provider.as_str() {
         "microsoft" => TranslationProviderType::Microsoft,
         "google" => TranslationProviderType::Google,
@@ -44,10 +24,35 @@ pub async fn set_translation_provider(
         other => return Err(format!("Unknown translation provider: {}", other)),
     };
 
+    // Unlock only the selected cloud service. Local and LLM translation do not
+    // need any translation-provider secrets, especially during app startup.
+    let credential_name = match provider.as_str() {
+        "microsoft" => Some("translation_microsoft"),
+        "google" => Some("translation_google"),
+        "deepl" => Some("translation_deepl"),
+        _ => None,
+    };
+    let key = if let Some(name) = credential_name {
+        let credentials = state.credentials.clone().ok_or("Credential manager unavailable")?;
+        tauri::async_runtime::spawn_blocking(move || {
+            let manager = credentials.lock().map_err(|_| "Credential manager unavailable")?;
+            manager.get_key(name)
+        }).await.map_err(|_| "Credential operation interrupted")??
+    } else { None };
+
     let trans_arc = state.translation.as_ref()
         .ok_or("Translation router not initialized")?;
     let mut router = trans_arc.lock()
         .map_err(|_| "Translation lock poisoned".to_string())?;
+
+    if let Some(key) = key {
+        match provider.as_str() {
+            "microsoft" => router.set_microsoft_credentials(key, region),
+            "google" => router.set_google_credentials(key),
+            "deepl" => router.set_deepl_credentials(key),
+            _ => {}
+        }
+    }
 
     router.set_provider(provider_type)
         .map_err(|e| e.to_string())

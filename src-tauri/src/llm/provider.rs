@@ -95,6 +95,8 @@ impl Serialize for LLMError {
 pub struct StreamStartPayload {
     pub evidence: Vec<crate::projects::knowledge::EvidenceRef>,
     pub search_degraded: bool,
+    #[serde(default)]
+    pub search_reason: Option<String>,
     pub question: Option<String>,
     pub mode: String,
     pub model: String,

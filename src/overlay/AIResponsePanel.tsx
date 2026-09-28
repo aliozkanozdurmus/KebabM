@@ -1,5 +1,5 @@
 import { readingColor } from "../lib/readingColor";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Check, Copy, Loader2, Pin, X } from "lucide-react";
 import { useStreamStore } from "../stores/streamStore";
@@ -18,29 +18,56 @@ export function AIResponsePanel() {
   const stream = useStreamStore();
   const config = useConfigStore();
   // Stable response IDs keep the answer being read in place when another completes.
-  const [selected, setSelected] = useState<string | null>(null);
+  const selected = stream.selectedResponseId;
+  const setSelected = stream.selectResponse;
   const [copied, setCopied] = useState(false);
   const [source, setSource] = useState<{ ref: EvidenceRef; text: string } | null>(null);
   const [sourceError, setSourceError] = useState("");
   const [loadingSource, setLoadingSource] = useState(false);
+  const sourceRequest = useRef(0);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
   const latest = stream.responseHistory[0];
   useEffect(() => { if (!selected && latest && !stream.isStreaming) setSelected(latest.id); }, [latest, selected, stream.isStreaming]);
   const response = [...stream.responseHistory, ...stream.pinnedResponses].find(r => r.id === selected);
   const content = response?.content ?? stream.currentContent;
   const evidence = response?.evidence ?? stream.currentEvidence;
   const question = response?.question ?? stream.currentQuestion;
+  const mode = response?.mode ?? stream.currentMode;
+  const questionLabel = mode === "Shorten" ? "Shorter answer" : mode === "FollowUp" ? "Follow-up questions" : question;
   const follow = splitFollowUps(content);
   const [brief, ...detail] = follow.body.split(/\n(?=## (?:Detail|Details|Detay|Ayrıntı))/i);
   const isReadingLive = !response;
+  const displayedAnswerId = response?.id ?? stream.requestId;
+  useLayoutEffect(() => {
+    sourceRequest.current += 1;
+    setSource(null);
+    setSourceError("");
+    setLoadingSource(false);
+    // Invalidate pending reads on selection changes and unmount.
+    return () => { sourceRequest.current += 1; };
+  }, [displayedAnswerId]);
   const estimatedCost = response && estimateAnswerCost(response.provider, response.model, response.promptTokens, response.completionTokens);
-  const act = (mode: string, text: string) => {
-    generateAssist(mode, text, ["Shorten", "FollowUp"].includes(mode) ? evidence : undefined).catch(e => showToast(String(e), "error"));
+  const act = async (mode: string, text: string, refs = evidence) => {
+    setPendingAction(mode);
+    try {
+      const id = await generateAssist(mode, text, ["Shorten", "FollowUp"].includes(mode) ? refs : undefined);
+      // Explicit actions show their result; unrelated automatic answers still wait.
+      setSelected(id);
+      setSource(null);
+    } catch (e) { showToast(String(e), "error"); }
+    finally { setPendingAction(null); }
   };
   const openSource = async (ref: EvidenceRef) => {
+    const request = ++sourceRequest.current;
     setLoadingSource(true); setSourceError(""); setSource(null);
-    try { setSource({ ref, text: await invoke<string>("read_project_evidence", { id: ref.id }) }); }
-    catch (e) { setSourceError(String(e)); }
-    finally { setLoadingSource(false); }
+    try {
+      const text = await invoke<string>("read_project_evidence", { id: ref.id });
+      if (request === sourceRequest.current) setSource({ ref, text });
+    } catch (e) {
+      if (request === sourceRequest.current) setSourceError(String(e));
+    } finally {
+      if (request === sourceRequest.current) setLoadingSource(false);
+    }
   };
   return <section className="flex min-h-0 flex-1 flex-col gap-3" aria-label="Meeting answer">
     <div className="flex flex-wrap items-center gap-2 border-b border-border pb-2">
@@ -52,19 +79,19 @@ export function AIResponsePanel() {
     </div>
     {stream.error && <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 p-2 text-xs">
       <span className="min-w-0 flex-1 text-destructive">{stream.error}</span>
-      <button className={button} disabled={stream.isStreaming} onClick={() => generateAssist(stream.currentMode ?? "Assist", stream.currentQuestion ?? "", stream.currentEvidence).catch(e => showToast(String(e), "error"))}>Retry</button>
+      <button className={button} disabled={stream.isStreaming || !!pendingAction} onClick={() => act(stream.currentMode ?? "Assist", stream.currentQuestion ?? "", stream.currentEvidence)}>Retry</button>
     </div>}
     <div className="min-h-0 flex-1 overflow-y-auto space-y-4 pr-1">
-      {(response?.searchDegraded ?? stream.searchDegraded) && <p className="text-xs text-muted-foreground">Keyword search · semantic search unavailable or not configured</p>}
-      {question && <p className="text-xs leading-relaxed text-muted-foreground">{question}</p>}
+      {(response?.searchDegraded ?? stream.searchDegraded) && <p className="text-xs text-muted-foreground">{response ? (response.searchReason ?? "Keyword search used for this answer.") : (stream.searchReason ?? "Keyword search used for this answer.")}</p>}
+      {questionLabel && <p className="text-xs leading-relaxed text-muted-foreground">{questionLabel}</p>}
       {content ? <>
         <div className="answer-content prose prose-sm max-w-none break-words" style={{ fontSize: `${config.aiResponseFontSize}px`, color: readingColor(config.aiResponseTextColor, "answer"), lineHeight: config.aiResponseLineHeight, paddingInline: config.aiResponseHPad, textAlign: config.aiResponseAlign }}>
           <AnswerMarkdown content={brief} />
         </div>
         {detail.length > 0 && <details><summary className="cursor-pointer text-xs font-medium">Details</summary><div className="prose prose-sm prose-invert mt-3"><AnswerMarkdown content={detail.join("\n")} /></div></details>}
         <div className="flex flex-wrap gap-2">
-          <button className={button} disabled={stream.isStreaming} onClick={() => act("Shorten", `Shorten this answer, preserving its source markers:\n${content}`)}>Shorter</button>
-          <button className={button} disabled={stream.isStreaming} onClick={() => act("FollowUp", `Suggest a useful follow-up to this question and answer:\n${question ?? ""}\n${content}`)}>Follow-up</button>
+          <button className={button} disabled={stream.isStreaming || !!pendingAction} onClick={() => act("Shorten", `Shorten this answer, preserving its source markers:\n${content}`)}>{pendingAction === "Shorten" ? "Shortening…" : "Shorter"}</button>
+          <button className={button} disabled={stream.isStreaming || !!pendingAction} onClick={() => act("FollowUp", `Suggest a useful follow-up to this question and answer:\n${question ?? ""}\n${content}`)}>{pendingAction === "FollowUp" ? "Preparing follow-up…" : "Follow-up"}</button>
           <button className={`${button} flex items-center gap-1`} onClick={async () => { try { await navigator.clipboard.writeText(content); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch { showToast("Clipboard unavailable", "error"); } }}>{copied ? <Check size={12} /> : <Copy size={12} />}Copy</button>
           {response && <button className={`${button} flex items-center gap-1`} aria-pressed={stream.pinnedResponses.some(r => r.id === response.id)} onClick={() => stream.pinnedResponses.some(r => r.id === response.id) ? stream.unpinResponse(response.id) : stream.pinResponse(response.id)}><Pin size={12} />Keep</button>}
         </div>
@@ -76,7 +103,7 @@ export function AIResponsePanel() {
           </ol>
           {loadingSource && <p role="status" className="text-xs">Opening source…</p>}
           {sourceError && <p role="alert" className="text-xs text-destructive">{sourceError}</p>}
-          {source && <div className="mt-2 rounded-md border border-border p-3"><div className="flex items-start gap-2"><p className="min-w-0 flex-1 break-all text-xs font-mono">{source.ref.path}</p><button aria-label="Close source" onClick={() => setSource(null)}><X size={14} /></button></div><p className="my-2 text-xs text-muted-foreground">Indexed snapshot · line {source.ref.startLine}</p><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed">{source.text}</pre></div>}
+          {source && <div className="mt-2 rounded-md border border-border p-3"><div className="flex items-start gap-2"><p className="min-w-0 flex-1 break-all text-xs font-mono">{source.ref.path}</p><button aria-label="Close source" onClick={() => { sourceRequest.current += 1; setSource(null); }}><X size={14} /></button></div><p className="my-2 text-xs text-muted-foreground">Indexed snapshot · line {source.ref.startLine}</p><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed">{source.text}</pre></div>}
         </details>
         {follow.questions.length > 0 && <details><summary className="text-xs cursor-pointer">Suggested follow-ups</summary><div className="mt-2 space-y-2">{follow.questions.map(q => <button key={q} className={`${button} block text-left`} disabled={stream.isStreaming} onClick={() => act("AskQuestion", q)}>{q}</button>)}</div></details>}
         {response && <p className="text-[11px] text-muted-foreground" title={costScope}>{response.model} · {(response.latency_ms / 1000).toFixed(1)} s{response.totalTokens ? ` · ${response.totalTokens} tokens` : ""}{estimatedCost != null ? ` · ~$${estimatedCost.toFixed(4)} text cost` : " · cost unavailable"}</p>}

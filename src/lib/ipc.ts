@@ -241,7 +241,7 @@ export async function setAiReplyLanguage(language: string): Promise<void> {
   return invoke("set_ai_reply_language", { language });
 }
 
-export async function generateAssist(mode: string, customQuestion?: string, sourceEvidence?: import("./types").EvidenceRef[]): Promise<void> {
+export async function generateAssist(mode: string, customQuestion?: string, sourceEvidence?: import("./types").EvidenceRef[]): Promise<string> {
   // Standalone fallback only. Active meetings use Rust's durable transcript.
   const { useTranscriptStore } = await import("../stores/transcriptStore");
   const segments = useTranscriptStore.getState().segments
@@ -266,7 +266,24 @@ export async function generateAssist(mode: string, customQuestion?: string, sour
     if (isStreamRequestCurrent(requestId)) { closeStreamRequest(); useStreamStore.getState().setError(String(error)); }
     throw error;
   }
+  return requestId;
+}
 
+/** User-triggered actions refine the answer being read and reveal their own result. */
+export async function generateManualAssist(mode: string, question?: string): Promise<string> {
+  const { useStreamStore } = await import("../stores/streamStore");
+  const state = useStreamStore.getState();
+  let evidence: import("./types").EvidenceRef[] | undefined;
+  if (!question && (mode === "Shorten" || mode === "FollowUp")) {
+    const selected = [...state.responseHistory, ...state.pinnedResponses].find(r => r.id === state.selectedResponseId);
+    const content = selected?.content ?? state.currentContent;
+    if (!content.trim()) throw new Error("Get an answer first, then refine it here.");
+    evidence = selected?.evidence ?? state.currentEvidence;
+    question = `${mode === "Shorten" ? "Shorten this answer while retaining citations" : "Suggest follow-up questions about this answer"}:\n${content}`;
+  }
+  const id = await generateAssist(mode, question, evidence);
+  state.selectResponse(id);
+  return id;
 }
 
 export async function cancelGeneration(): Promise<void> {

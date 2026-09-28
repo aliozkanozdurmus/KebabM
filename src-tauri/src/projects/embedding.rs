@@ -61,12 +61,13 @@ pub fn config(conn: &Connection, project: &str) -> Result<EmbeddingConfig, Strin
         .map(|v| serde_json::from_str(&v).map_err(|e| e.to_string()))
         .unwrap_or_else(|| Ok(EmbeddingConfig::default()))
 }
-pub fn api_key(state: &AppState) -> Option<String> {
-    state
-        .credentials
-        .as_ref()
-        .and_then(|c| c.lock().ok())
-        .and_then(|c| c.get_key("gemini").ok().flatten())
+pub async fn api_key(state: &AppState) -> Result<Option<String>, String> {
+    let credentials = state.credentials.clone().ok_or("Credential manager unavailable")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let manager = credentials.try_lock()
+            .map_err(|_| "Credential store is busy. Wait for the current credential operation, then retry.")?;
+        manager.get_key("gemini")
+    }).await.map_err(|_| "Credential operation interrupted".to_string())?
 }
 pub async fn embed(
     config: &EmbeddingConfig,
@@ -178,6 +179,18 @@ pub fn cosine(a: &[f32], b: &[f32]) -> f64 {
         0.0
     }
 }
+
+/// Checkpoint one complete provider batch without replacing any older model's vectors.
+pub fn save_batch(conn: &Connection, config: &EmbeddingConfig, batch: &[(String, Vec<f32>)]) -> Result<(), String> {
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    for (chunk, vector) in batch {
+        validate_vector(vector, config.dimensions)?;
+        tx.execute("INSERT OR REPLACE INTO project_vectors VALUES (?1,?2,?3)",
+            params![chunk, config.key(), serde_json::to_string(vector).map_err(|e| e.to_string())?])
+            .map_err(|e| e.to_string())?;
+    }
+    tx.commit().map_err(|e| e.to_string())
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,5 +203,19 @@ mod tests {
         let key = a.key();
         a.dimensions = 768;
         assert_ne!(key, a.key());
+    }
+
+    #[test]
+    fn failed_batch_preserves_previous_checkpoint_and_rolls_back_partial_writes() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE project_vectors(chunk_id TEXT,model_key TEXT,vector TEXT,PRIMARY KEY(chunk_id,model_key));").unwrap();
+        let config = EmbeddingConfig { dimensions: 2, ..EmbeddingConfig::default() };
+        save_batch(&conn, &config, &[("first".into(), vec![1.0, 0.0])]).unwrap();
+        assert!(save_batch(&conn, &config, &[("second".into(), vec![0.0, 1.0]), ("bad".into(), vec![1.0])]).is_err());
+        let ids: String = conn.query_row("SELECT group_concat(chunk_id) FROM project_vectors", [], |r| r.get(0)).unwrap();
+        assert_eq!(ids, "first");
+        save_batch(&conn, &config, &[("second".into(), vec![0.0, 1.0])]).unwrap();
+        let count: i64 = conn.query_row("SELECT count(*) FROM project_vectors", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 2);
     }
 }

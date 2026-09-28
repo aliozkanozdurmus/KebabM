@@ -1,3 +1,6 @@
+import { TodayView } from "./TodayView";
+import type { CalendarEvent } from "../lib/calendar";
+import "./workspace.css";
 import { BrandMark } from "../components/BrandMark";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useMeetingStore } from "../stores/meetingStore";
@@ -92,7 +95,8 @@ export function LauncherView() {
   const [showTestKB, setShowTestKB] = useState(false);
   const [showMeetingSetup, setShowMeetingSetup] = useState(false);
   const [platform, setPlatform] = useState<PlatformCapabilities | null>(null);
-  const [workspaceTab, setWorkspaceTab] = useState<"prepare" | "history">("prepare");
+  const [workspaceTab, setWorkspaceTab] = useState<"today" | "prepare" | "history">("today");
+  const [calendarEvent, setCalendarEvent] = useState<CalendarEvent | null>(null);
   const [focusProjectId, setFocusProjectId] = useState<string | null>(null);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [generalContext, setGeneralContext] = useState<string | null>(null);
@@ -130,6 +134,7 @@ export function LauncherView() {
   // Called when user clicks Start Meeting button — open setup modal
   const handleStartMeeting = useCallback(() => {
     if (activeMeeting) { setShowConflictPrompt(true); return; }
+    setCalendarEvent(null);
     setShowMeetingSetup(true);
   }, [activeMeeting]);
 
@@ -141,12 +146,12 @@ export function LauncherView() {
     try {
       if ("context" in choice) {
         setGeneralContext(choice.context);
-        await setMeetingFeed(choice.context);
+        await setMeetingFeed([calendarEvent ? `Scheduled meeting: ${calendarEvent.title}\nTime: ${calendarEvent.start}` : "", choice.context].filter(Boolean).join("\n\n"));
       } else {
         setGeneralContext(null);
-        await setMeetingFeed("");
+        await setMeetingFeed(calendarEvent ? `Scheduled meeting: ${calendarEvent.title}\nTime: ${calendarEvent.start}` : "");
       }
-      await startMeetingFlow(undefined, "online", "team_meeting");
+      await startMeetingFlow(calendarEvent?.title, "online", "team_meeting");
       showToast("Meeting started", "success");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to start meeting";
@@ -155,7 +160,7 @@ export function LauncherView() {
     } finally {
       setIsStarting(false);
     }
-  }, [startMeetingFlow]);
+  }, [startMeetingFlow, calendarEvent]);
 
   const handleEndAndStartNew = useCallback(async () => {
     setShowConflictPrompt(false);
@@ -262,12 +267,12 @@ export function LauncherView() {
   }
 
   return (
-    <div className="app-surface flex h-full flex-col bg-background">
+    <div className="app-surface meeting-workspace flex h-full flex-col bg-background">
       {/* ═══ HEADER ═══ */}
       <header className="dash-header flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 text-foreground">
         <div className="flex items-center gap-3">
           <BrandMark decorative className="h-8 w-8" />
-          <span className="text-sm font-medium tracking-normal">ZaiqoM-MeetingHelper</span>
+          <span className="text-sm font-medium tracking-normal">KebabM</span>
         </div>
 
         {/* Active meeting in header */}
@@ -291,7 +296,7 @@ export function LauncherView() {
             onClick={handleStartMeeting}
             disabled={isStarting}
             aria-busy={isStarting}
-            className="flex h-8 items-center gap-2 bg-primary px-4 text-sm font-normal text-primary-foreground transition-colors hover:bg-[#0353e9] disabled:opacity-60 cursor-pointer"
+            className="flex h-8 items-center gap-2 bg-primary px-4 text-sm font-normal text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60 cursor-pointer"
           >
             {isStarting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" fill="currentColor" />}
             {isStarting ? "Starting" : "Start meeting"}
@@ -308,7 +313,7 @@ export function LauncherView() {
 
       {/* ═══ MAIN DASHBOARD ═══ */}
       <div className="flex flex-1 overflow-hidden">
-        <ProjectPanel
+        {workspaceTab === "prepare" && <ProjectPanel
           meetings={searchResults ?? recentMeetings}
           selectedMeetingId={selectedMeetingId}
           focusProjectId={focusProjectId}
@@ -318,15 +323,16 @@ export function LauncherView() {
           onChanged={() => {
             loadRecentMeetings();
           }}
-        />
+        />}
 
         <main className="flex min-w-0 flex-1 flex-col">
-          <nav className="flex shrink-0 gap-4 border-b border-border px-4" aria-label="Workspace">
-            <button className={`py-3 text-sm border-b-2 ${workspaceTab === "prepare" ? "border-primary" : "border-transparent text-muted-foreground"}`} onClick={() => setWorkspaceTab("prepare")}>Projects & preparation</button>
-            <button className={`py-3 text-sm border-b-2 ${workspaceTab === "history" ? "border-primary" : "border-transparent text-muted-foreground"}`} onClick={() => setWorkspaceTab("history")}>Meeting history</button>
+          <nav className="workspace-navigation flex shrink-0 gap-4 border-b border-border px-4" aria-label="Workspace">
+            <button aria-current={workspaceTab === "today" ? "page" : undefined} className={`py-3 text-sm border-b-2 ${workspaceTab === "today" ? "border-primary" : "border-transparent text-muted-foreground"}`} onClick={() => setWorkspaceTab("today")}>Today</button>
+            <button className={`py-3 text-sm border-b-2 ${workspaceTab === "prepare" ? "border-primary" : "border-transparent text-muted-foreground"}`} onClick={() => setWorkspaceTab("prepare")}>Projects</button>
+            <button className={`py-3 text-sm border-b-2 ${workspaceTab === "history" ? "border-primary" : "border-transparent text-muted-foreground"}`} onClick={() => setWorkspaceTab("history")}>All notes</button>
           </nav>
           {startError && <p role="alert" className="px-4 py-2 text-sm text-destructive">{startError}</p>}
-          {workspaceTab === "prepare" ? <ProjectWorkspace key={focusProjectId ?? "active"} project={projects.find(p => p.id === focusProjectId) ?? (focusProjectId !== "unassigned" ? projects.find(p => p.is_active) : undefined)} onChanged={() => { loadRecentMeetings(); }} /> : <>
+          {workspaceTab === "today" ? <TodayView meetings={recentMeetings} onSelectMeeting={handleSelectMeeting} onHistory={() => setWorkspaceTab("history")} onStartEvent={event => { if (activeMeeting) { setShowConflictPrompt(true); return; } setCalendarEvent(event); setShowMeetingSetup(true); }} /> : workspaceTab === "prepare" ? <ProjectWorkspace key={focusProjectId ?? "active"} project={projects.find(p => p.id === focusProjectId) ?? (focusProjectId !== "unassigned" ? projects.find(p => p.is_active) : undefined)} onChanged={() => { loadRecentMeetings(); }} /> : <>
         {/* ── MEETINGS, GROUPED BY PROJECT ── */}
         <div className="dash-main flex min-w-0 flex-1 flex-col bg-background">
           {/* Search */}
@@ -412,7 +418,7 @@ export function LauncherView() {
 
       {/* ═══ FOOTER ═══ */}
       <footer className="dash-footer flex items-center justify-between border-t border-border/20">
-        <ServiceStatusBar />
+        <details className="service-details"><summary>Services</summary><ServiceStatusBar /></details>
         <div className="flex items-center gap-2 pr-5 text-xs text-muted-foreground/60">
           <span>&copy; {new Date().getFullYear()} {NEXQ_DEVELOPER}</span>
           <span className="text-muted-foreground/40">|</span>
@@ -423,6 +429,7 @@ export function LauncherView() {
       {/* ═══ MEETING SETUP MODAL ═══ */}
       <MeetingSetupModal
         open={showMeetingSetup}
+        meetingTitle={calendarEvent?.title}
         onStart={handleSetupConfirm}
         onCancel={() => setShowMeetingSetup(false)}
       />

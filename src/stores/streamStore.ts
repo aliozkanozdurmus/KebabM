@@ -14,6 +14,7 @@ interface StreamState {
   currentSources: StreamSource[];
   currentEvidence: EvidenceRef[];
   searchDegraded: boolean;
+  searchReason?: string;
   currentQuestion?: string;
   requestId?: string;
   sessionId?: string;
@@ -23,6 +24,8 @@ interface StreamState {
   // Session history and pinned responses
   responseHistory: AIResponse[];
   pinnedResponses: AIResponse[];
+  selectedResponseId: string | null;
+  selectResponse: (id: string | null) => void;
 
   // Actions
   setStreaming: (streaming: boolean) => void;
@@ -51,6 +54,8 @@ export const useStreamStore = create<StreamState>((set, get) => ({
   latencyMs: null,
   responseHistory: [],
   pinnedResponses: [],
+  selectedResponseId: null,
+  selectResponse: (selectedResponseId) => set({ selectedResponseId }),
 
   setStreaming: (streaming) => set({ isStreaming: streaming }),
 
@@ -75,6 +80,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       currentSources: [],
       currentEvidence: event?.evidence ?? [],
       searchDegraded: event?.search_degraded ?? false,
+      searchReason: event?.search_reason,
       currentQuestion: event?.question,
       requestId: event?.requestId,
       sessionId: event?.sessionId,
@@ -94,6 +100,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       question: state.currentQuestion,
       evidence: state.currentEvidence,
       searchDegraded: state.searchDegraded,
+      searchReason: state.searchReason,
       sessionId: state.sessionId,
       totalTokens,
       promptTokens,
@@ -120,7 +127,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
 
   setError: (error) => set({ error, isStreaming: false, phase: null }),
   clearCurrent: () =>
-    set({ isStreaming: false, phase: null, currentEvidence: [], currentQuestion: undefined, requestId: undefined, sessionId: undefined, searchDegraded: false, currentContent: "", _rawContent: "", currentMode: null, currentModel: "", currentProvider: "", currentSources: [], error: null, latencyMs: null }),
+    set({ selectedResponseId: null, isStreaming: false, phase: null, currentEvidence: [], currentQuestion: undefined, requestId: undefined, sessionId: undefined, searchDegraded: false, searchReason: undefined, currentContent: "", _rawContent: "", currentMode: null, currentModel: "", currentProvider: "", currentSources: [], error: null, latencyMs: null }),
 
   pinResponse: (id) => {
     const state = get();

@@ -35,14 +35,17 @@ pub const SHORTEN_PROMPT: &str = "\
 Condense the following into a brief, clear response that could be spoken in under 30 seconds. \
 Preserve the core message and key points. Remove filler, redundancy, and secondary details. \
 Output only the shortened version — no commentary or explanation. \
-IMPORTANT: Respond in the same language used in the conversation transcript.";
+Preserve source markers attached to retained factual claims. Do not add follow-up questions. \
+The assistance language at the end of the system prompt decides your output language.";
 
 pub const FOLLOW_UP_PROMPT: &str = "\
 Based on the meeting conversation, suggest 2-3 thoughtful follow-up questions the user could \
 ask the other participants. Each question should demonstrate active listening, deepen the \
 discussion, or clarify important points. Format as a numbered list. \
 Make them specific to what was discussed, not generic. \
-Also add a second list titled \"You could ask\" with three example questions the user can ask next. \
+Each question must be a single short sentence, ideally under 20 words, easy to read aloud during a meeting. \
+Ask one thing per question. Avoid long recaps, stacked clauses, and assumptions about unverified operational facts. \
+Output only those questions, without a second list, preamble, or an answer to the original question. \
 The assistance language at the end of the system prompt decides your output language.";
 
 pub const RECAP_PROMPT: &str = "\

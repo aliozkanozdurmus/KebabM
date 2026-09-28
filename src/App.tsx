@@ -318,7 +318,7 @@ function App() {
             <div className="h-8 w-8 rounded-xl bg-primary/10 flex items-center justify-center">
               <BrandMark className="h-10 w-10" />
             </div>
-            <div className="text-sm text-muted-foreground">Starting ZaiqoM-MeetingHelper...</div>
+            <div className="text-sm text-muted-foreground">Starting KebabM...</div>
           </div>
         )}
       </div>
@@ -334,7 +334,7 @@ function App() {
   if (isOverlayWindow) {
     return (
       <div className="h-screen w-screen overflow-hidden bg-transparent text-foreground">
-        <ErrorBoundary fallbackMessage="ZaiqoM-MeetingHelper encountered an error">
+        <ErrorBoundary fallbackMessage="KebabM encountered an error">
           {currentView === "overlay" && (
             <ErrorBoundary fallbackMessage="Failed to load overlay">
               <div className="flex h-full">
@@ -357,7 +357,7 @@ function App() {
 
   return (
     <div className={`h-screen w-screen overflow-hidden text-foreground ${resolvedView === "overlay" ? "bg-transparent" : "bg-background"}`}>
-      <ErrorBoundary fallbackMessage="ZaiqoM-MeetingHelper encountered an error">
+      <ErrorBoundary fallbackMessage="KebabM encountered an error">
         {resolvedView === "launcher" && (
           <ErrorBoundary fallbackMessage="Failed to load launcher">
             <LauncherView />

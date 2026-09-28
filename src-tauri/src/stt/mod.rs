@@ -469,8 +469,8 @@ impl STTRouter {
     ) -> Result<bool, String> {
         match provider_type {
             STTProviderType::WebSpeech => {
-                // WebSpeech is always available in Chromium-based WebView
-                Ok(true)
+                // Browser capability and microphone permission must be checked in the actual window.
+                Err("Test Web Speech in the app window; the native service cannot verify browser support or microphone permission".into())
             }
             STTProviderType::WhisperCpp => {
                 // WhisperCpp engine is always available; model availability

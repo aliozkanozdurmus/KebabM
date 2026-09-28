@@ -355,7 +355,7 @@ export function LLMSetupStep({
               </button>
             </div>
             <p className="text-xs text-muted-foreground">
-              Stored securely in your system keychain
+              Stored locally on this device. macOS uses an owner-only file without Keychain prompts.
             </p>
           </div>
         )}
@@ -433,7 +433,7 @@ export function LLMSetupStep({
             <span className="font-medium text-foreground">Tip: </span>
             {hasLocalLLM
               ? "For privacy and speed, we recommend using Ollama with llama3.2. Your conversations never leave your machine."
-              : "For the best experience, we recommend Anthropic Claude. For local privacy, install Ollama and run it before starting ZaiqoM-MeetingHelper."}
+              : "For the best experience, we recommend Anthropic Claude. For local privacy, install Ollama and run it before starting KebabM."}
           </p>
         </div>
       </div>

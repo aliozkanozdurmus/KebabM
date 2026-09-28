@@ -96,6 +96,12 @@ impl QuestionDetector {
                 }
             }
 
+            // STT frequently omits punctuation. Promote direct question syntax,
+            // but leave declarative clauses ("how we deploy") below the fallback threshold.
+            if direct_english_question(&lower) {
+                confidence = confidence.max(0.8);
+            }
+
             // Word boundaries avoid matching syllables inside unrelated Turkish words.
             if lower.split_whitespace().any(|w| ["nasıl", "neden", "nereden", "nerede", "hangi", "mı", "mi", "mu", "mü"].contains(&w.trim_matches(|c: char| !c.is_alphabetic()))) {
                 confidence = confidence.max(0.75);
@@ -113,6 +119,20 @@ impl QuestionDetector {
 
         questions
     }
+}
+
+fn direct_english_question(text: &str) -> bool {
+    let words: Vec<_> = text.split_whitespace().collect();
+    if words.len() < 3 { return false; }
+    let auxiliaries = ["am", "is", "are", "was", "were", "do", "does", "did", "can", "could", "would", "should", "will", "has", "have", "had"];
+    let wh = ["what", "why", "how", "when", "where", "who", "which"];
+    (wh.contains(&words[0]) && auxiliaries.contains(&words[1]))
+        || (["which", "what"].contains(&words[0])
+            && !["i", "you", "we", "they", "he", "she", "it"].contains(&words[1])
+            && auxiliaries.contains(&words[2]))
+        || (auxiliaries.contains(&words[0])
+            && ["i", "you", "we", "they", "he", "she", "it", "this", "that", "these", "those", "there"].contains(&words[1]))
+        || (words[0] == "what" && ["about", "happens"].contains(&words[1]))
 }
 
 /// Split text into sentences using common sentence terminators.
@@ -138,4 +158,37 @@ fn split_sentences(text: &str) -> Vec<String> {
     }
 
     sentences
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fallback_recognizes_direct_english_questions_without_stt_punctuation() {
+        let detector = QuestionDetector::new();
+        for text in [
+            "How does this pipeline work", "Where is the purchase order stored",
+            "Why did the extraction fail", "When will the release be ready",
+            "Which checks are required", "What happens after human review",
+            "Can we retry a failed document", "Do we have a rollback plan",
+            "Is this feature enabled in production", "What about failed invoices",
+        ] {
+            assert!(detector.detect_questions(text, 1, "them").iter().any(|q| q.confidence >= 0.75), "Missed: {text}");
+        }
+    }
+
+    #[test]
+    fn fallback_does_not_promote_english_declarative_clauses() {
+        let detector = QuestionDetector::new();
+        for text in [
+            "How we deploy depends on the environment", "What we need is a rollback plan",
+            "What we are reviewing is the deployment", "Which we are fixing this week",
+            "Where the data goes is documented", "Which checks run depends on the branch",
+            "When we finish we will review it", "The pipeline validates every change",
+            "Do not deploy before approval", "Can be retried after the review",
+        ] {
+            assert!(detector.detect_questions(text, 1, "them").iter().all(|q| q.confidence < 0.75), "False trigger: {text}");
+        }
+    }
 }

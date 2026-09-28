@@ -25,6 +25,8 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
+      // Some macOS volumes block FSEvents; allow deterministic polling in local QA.
+      ...(process.env.CHOKIDAR_USEPOLLING === "1" ? { usePolling: true, useFsEvents: false } : {}),
       ignored: ["**/src-tauri/**"],
     },
   },

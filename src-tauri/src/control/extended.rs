@@ -34,7 +34,24 @@ pub(super) async fn dispatch(app: &AppHandle, tool: &str, args: &Value) -> Resul
         "test_translation" => serde_json::to_value(crate::commands::translation_commands::test_translation_connection(app.clone(),String::new()).await?).map_err(|e|e.to_string()),
         "meeting_translations" => serde_json::to_value(crate::commands::translation_commands::get_all_meeting_translations(app.clone(),id()?).await?).map_err(|e|e.to_string()),
         "knowledge_status" => parsed(project::project_knowledge_status(id()?,app.state()).await?),
-        "search_knowledge" => parsed(project::search_project_knowledge(id()?,required_string(args,"question")?,app.state()).await?),
+        "search_knowledge" => {
+            let diagnostics = match args.get("includeDiagnostics") {
+                Some(value) => value.as_bool().ok_or("includeDiagnostics must be a boolean")?,
+                None => false,
+            };
+            if !diagnostics {
+                return parsed(project::search_project_knowledge(id()?,required_string(args,"question")?,app.state()).await?);
+            }
+            let started = std::time::Instant::now();
+            let state = app.state::<AppState>();
+            let selected = {
+                let database = state.database.as_ref().ok_or("Database not initialized")?;
+                let db = database.lock().map_err(|_| "Database lock unavailable")?;
+                crate::projects::get(db.connection(), &id()?)?
+            };
+            let (hits, degraded, reason) = project::retrieve_project(&state, &selected, &required_string(args,"question")?).await?;
+            Ok(json!({"hits":hits,"degraded":degraded,"reason":reason,"retrievalMs":started.elapsed().as_millis()}))
+        },
         "read_evidence" => Ok(json!({"id":id()?,"text":project::read_project_evidence(id()?,app.state()).await?})),
         "get_embedding_config" => serde_json::to_value(project::project_embedding_config(id()?,None,app.state()).await?).map_err(|e|e.to_string()),
         "set_embedding_config" => {
@@ -59,7 +76,15 @@ pub(super) async fn dispatch(app: &AppHandle, tool: &str, args: &Value) -> Resul
         "ask_question" => {
             let session_id=session::current_id(app).ok_or("Start a meeting before asking a question")?;
             let request_id=Uuid::new_v4().to_string();
-            intelligence::generate_assist(match optional_string(args,"mode").as_deref().unwrap_or("assist") {"assist"=>"Assist","say"=>"Say","short"=>"Shorten","followup"=>"FollowUp","recap"=>"Recap",_=>return Err("Invalid answer mode".into())}.into(),Some(required_string(args,"question")?),None,Some(request_id.clone()),Some(session_id),None,None,app.clone(),app.state()).await?;
+            intelligence::generate_assist(match optional_string(args,"mode").as_deref().unwrap_or("assist") {"assist"=>"Assist","say"=>"WhatToSay","short"=>"Shorten","followup"=>"FollowUp","recap"=>"Recap",_=>return Err("Invalid answer mode".into())}.into(),Some(required_string(args,"question")?),None,Some(request_id.clone()),Some(session_id),None,None,app.clone(),app.state()).await?;
+            Ok(json!({"requestId":request_id,"session":session_value(app)?}))
+        },
+        "refine_answer" => {
+            let current=session::get_assist_session(app.clone())?;
+            let session_id=current.session_id.ok_or("Start a meeting before refining an answer")?;
+            let (mode,question,evidence)=refinement(&current.answers,&required_string(args,"answer_id")?,&required_string(args,"mode")?)?;
+            let request_id=Uuid::new_v4().to_string();
+            intelligence::generate_assist(mode,Some(question),None,Some(request_id.clone()),Some(session_id),None,Some(evidence),app.clone(),app.state()).await?;
             Ok(json!({"requestId":request_id,"session":session_value(app)?}))
         },
         "answer_question" => {session::answer_session_question(id()?,app.clone()).await?;session_value(app)},
@@ -110,4 +135,32 @@ fn translation_config(app: &AppHandle) -> Result<Value,String> {
     let state=app.state::<AppState>();
     let router=state.translation.as_ref().ok_or("Translation not initialized")?.lock().map_err(|_|"Translation state unavailable")?;
     Ok(json!({"saved":{"provider":store.get("provider"),"targetLang":store.get("targetLang"),"sourceLang":store.get("sourceLang")},"active":{"provider":router.active_provider_name(),"targetLang":router.default_target_lang(),"sourceLang":router.default_source_lang()}}))
+}
+
+
+fn refinement(answers: &[Value], id: &str, mode: &str) -> Result<(String,String,Vec<crate::projects::knowledge::EvidenceRef>),String> {
+    let (mode,instruction)=match mode {
+        "short" => ("Shorten","Shorten this answer while retaining citations"),
+        "followup" => ("FollowUp","Suggest follow-up questions about this answer"),
+        _ => return Err("Choose short or followup".into()),
+    };
+    let answer=answers.iter().find(|a| a["id"].as_str()==Some(id)).ok_or("Selected answer is not in this meeting. Read get_session and select an answer again.")?;
+    let content=answer["content"].as_str().filter(|s| !s.trim().is_empty()).ok_or("The selected answer is empty. Generate an answer first.")?;
+    let evidence=serde_json::from_value(answer["evidence"].as_array().cloned().map(Value::Array).unwrap_or(json!([]))).map_err(|_| "Selected answer has invalid source references")?;
+    Ok((mode.into(),format!("{instruction}:\n{content}"),evidence))
+}
+
+#[cfg(test)]
+mod refinement_tests {
+    use super::*;
+    #[test]
+    fn uses_selected_answer_and_rejects_missing_or_empty_answers() {
+        let answers=vec![json!({"id":"old","content":"Original answer [S1]","evidence":[]}),json!({"id":"new","content":"New answer","evidence":[]})];
+        let (mode,prompt,_)=refinement(&answers,"old","short").unwrap();
+        assert_eq!(mode,"Shorten"); assert!(prompt.contains("Original answer [S1]")); assert!(!prompt.contains("New answer"));
+        assert_eq!(refinement(&answers,"old","followup").unwrap().0,"FollowUp");
+        assert!(refinement(&answers,"missing","short").is_err());
+        assert!(refinement(&answers,"old","invalid").is_err());
+        assert!(refinement(&[json!({"id":"empty","content":" "})],"empty","short").is_err());
+    }
 }

@@ -1,3 +1,4 @@
+pub mod calendar;
 pub mod audio;
 pub mod control;
 pub mod projects;
@@ -200,7 +201,7 @@ pub fn run() {
             log::info!("Model manager initialized");
 
             // -- Initialize CredentialManager --
-            let cred_mgr = credentials::CredentialManager::new();
+            let cred_mgr = credentials::CredentialManager::with_data_dir(app_data_dir.clone());
             app_state.credentials = Some(Arc::new(Mutex::new(cred_mgr)));
             log::info!("Credential manager initialized");
 
@@ -326,6 +327,7 @@ pub fn run() {
             log::info!("OPUS-MT model manager initialized");
 
             app.manage(app_state);
+            app.manage(calendar::CalendarState::default());
             intelligence::session::start_worker(app.handle().clone());
 
             // -- Auto-detect first Ollama model in background --
@@ -504,6 +506,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            calendar::calendar_status, calendar::calendar_connect, calendar::calendar_cancel,
+            calendar::calendar_events, calendar::calendar_disconnect,
             // == COMMANDS: audio ==
             audio_commands::list_audio_devices,
             audio_commands::start_capture,
