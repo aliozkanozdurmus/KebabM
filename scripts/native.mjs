@@ -9,7 +9,9 @@ const env = { ...process.env };
 for (const name of ["APPLE_CERTIFICATE", "APPLE_CERTIFICATE_PASSWORD", "APPLE_SIGNING_IDENTITY", "APPLE_ID", "APPLE_PASSWORD", "APPLE_TEAM_ID", "TAURI_SIGNING_PRIVATE_KEY", "TAURI_SIGNING_PRIVATE_KEY_PASSWORD"]) {
   if (env[name] === "") delete env[name];
 }
-env.PATH = [join(homedir(), ".cargo", "bin"), ...(process.platform === "darwin" ? ["/opt/homebrew/bin", "/usr/local/bin"] : []), env.PATH].join(delimiter);
+// Windows commonly exposes `Path`; duplicate `PATH` keys hide Node/npm from child processes.
+const pathKey = Object.keys(env).find(name => name.toLowerCase() === "path") ?? "PATH";
+env[pathKey] = [join(homedir(), ".cargo", "bin"), ...(process.platform === "darwin" ? ["/opt/homebrew/bin", "/usr/local/bin"] : []), env[pathKey]].join(delimiter);
 if (process.platform === "darwin" && !env.LIBCLANG_PATH) {
   const developer = execFileSync("xcode-select", ["-p"], { encoding: "utf8" }).trim();
   env.LIBCLANG_PATH = ["usr/lib", "Toolchains/XcodeDefault.xctoolchain/usr/lib"].map(p => join(developer, p)).find(p => existsSync(join(p, "libclang.dylib")));
