@@ -2,8 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use libpulse_binding::context::{Context, State};
-use libpulse_binding::context::flags as ctx_flags;
+use libpulse_binding::context::{Context, FlagSet, State};
 use libpulse_binding::mainloop::standard::{IterateResult, Mainloop};
 use libpulse_binding::sample::{Format, Spec};
 use libpulse_binding::stream::Direction;
@@ -93,7 +92,7 @@ fn default_sink_monitor() -> Result<String, String> {
     let mut mainloop = Mainloop::new().ok_or_else(|| "Pulse mainloop failed".to_string())?;
     let mut context = Context::new(&mainloop, "zaiqoM").ok_or_else(|| "Pulse context failed".to_string())?;
     context
-        .connect(None, ctx_flags::NOFLAGS, None)
+        .connect(None, FlagSet::NOFLAGS, None)
         .map_err(|e| format!("Pulse connect failed: {e}"))?;
 
     let deadline = std::time::Instant::now() + Duration::from_secs(3);

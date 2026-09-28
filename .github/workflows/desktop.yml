@@ -67,9 +67,26 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+          cache-on-failure: true
       - run: npm ci
       - run: npm run check
       - run: cargo test --release --locked --manifest-path src-tauri/Cargo.toml
+      - name: Diagnose Windows loader failures
+        if: failure() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem src-tauri/target -Recurse -Filter *.dll | Select-Object FullName, Length
+          Get-ChildItem src-tauri/target -Recurse -Filter nexq_lib-*.exe | ForEach-Object {
+            & "C:\Program Files\LLVM\bin\llvm-readobj.exe" --coff-imports $_.FullName
+          }
+      - uses: actions/upload-artifact@v7.0.1
+        if: failure() && runner.os == 'Windows'
+        with:
+          name: native-loader-${{ github.workflow }}-${{ github.run_id }}
+          path: |
+            src-tauri/target/**/deps/nexq_lib-*.exe
+            src-tauri/target/**/*.dll
+          retention-days: 3
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - if: inputs.signed
